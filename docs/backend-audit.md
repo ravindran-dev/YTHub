@@ -1,0 +1,17 @@
+# Backend audit before replacement
+
+Inspected `main.rs`, `manager.rs`, `engine.rs`, `process.rs`, `archive.rs`, `storage.rs`, `models.rs`, `errors.rs`, and `desktop.rs` before changing the engine.
+
+The Tauri enqueue command performs yt-dlp metadata analysis, then constructs every playlist entry as a full `Job` (including cloned settings) in a single in-memory JSON database. A 350 ms polling loop scans queued jobs in insertion order and spawns one async task and yt-dlp process for each available slot. The one global limit is 1–4, so multiple playlists share capacity, but the earliest playlist can monopolize it. There is no bounded submission channel, per-host limit, task priority, duplicate queue identity, adaptive controller, aggregate bandwidth policy, or application retry queue.
+
+yt-dlp receives structured arguments, `--continue`, configurable fragment concurrency, network retries and timeout, and structured JSON progress templates. Its own post-processors start FFmpeg inside the same process tree; there is no independently controlled processing queue. Progress relies on yt-dlp's 250 ms interval, with no independent backend coalescer; each progress payload contains the full job/settings and two events are sent. Stdout line and metadata output buffers have no explicit byte bound. Speed/ETA are forwarded directly with no rolling average.
+
+Cancellation uses an atomic flag, taskkill, child kill-on-drop, and Windows Job Objects with kill-on-close. This is useful orphan protection, though there is an initial attach-after-spawn race. The flag is checked through a polling branch that can be delayed while output is continuously ready. State transitions are partly guarded, but internal processing assignments bypass the transition function. Failed items are terminal immediately; retries are manual or internal yt-dlp retries, without jitter, shared throttle cooldown, or classified policies.
+
+ZIP writes stream through a 1 MiB buffer on spawn_blocking, preserving playlist indices and partial-file cleanup. However every ready playlist can spawn a ZIP worker, and ZIP entries share the running map with downloads. No separate ZIP limit or pressure-aware admission exists. Cancellation and retained source data are implemented.
+
+Destination/temp folders have write probes. Admission uses a 100 MiB threshold and an audio estimate; there are no per-volume reservations or runtime free-space checks. Temp folders use task UUIDs and successful tasks clean up; resumable partials are retained. Startup restores active and queued items as paused, but has no explicit interrupted state or playlist resume control.
+
+Persistence serializes and syncs the whole pretty JSON database while holding its mutex. It copies a backup, deletes the primary, then renames the replacement; the backup covers a crash gap, but database writes and full-state frontend events grow with history and playlist size. Progress itself is not persisted every tick, but no periodic checkpoint exists. Many filesystem operations run synchronously on Tokio threads. Mutex unwraps and discarded save errors can conceal failure or propagate poisoning.
+
+The audit therefore establishes bounded media process counts in the old implementation, not production readiness or verified large-playlist performance. The new architecture is validated with offline mocked scheduling/stress tests and real local process/media tests; throughput claims require separate measurements.

@@ -1,0 +1,14 @@
+node_modules/
+node_modules.previous/
+package-lock.previous.json
+dist/
+src-tauri/target/
+src-tauri/binaries/*.exe
+src-tauri/binaries/*.zip
+src-tauri/binaries/*.7z
+artifacts/
+artifacts-*.json
+artifacts-*.py
+*.tsbuildinfo
+*.log
+.DS_Store

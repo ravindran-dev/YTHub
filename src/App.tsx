@@ -1,0 +1,466 @@
+import { useEffect, useState, useCallback } from "react";
+import { listen } from "@tauri-apps/api/event";
+import {
+  LayoutDashboard,
+  Download,
+  History,
+  Settings,
+  Info,
+  ArrowUpRight,
+  ChevronRight,
+  X,
+  CircleCheck,
+  LoaderCircle,
+} from "lucide-react";
+import { useApp, perform } from "./stores/app";
+import { call, desktop } from "./api";
+import type {
+  Database,
+  EngineVersion,
+  Page,
+  Job,
+  Batch,
+  Diagnostics,
+} from "./types";
+import Dashboard from "./pages/Dashboard";
+import Downloads from "./pages/Downloads";
+import SettingsPage, { EnginePanel } from "./pages/Settings";
+import { JobDetails, Modal } from "./components/Common";
+import { active, terminal } from "./utils/media";
+
+export default function App() {
+  const { db, page, navigate, error, message, clearError, notify, setDb } =
+    useApp();
+  const [selected, setSelected] = useState<string | null>(null);
+  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  useEffect(() => {
+    setSelectedJob(null);
+    if (selected && !useApp.getState().db?.jobs.some((j) => j.id === selected))
+      void perform(async () =>
+        setSelectedJob(await call<Job>("get_job", { id: selected })),
+      );
+  }, [selected]);
+  const [versions, setVersions] = useState<EngineVersion[]>([]);
+  const [checking, setChecking] = useState(false);
+  const [close, setClose] = useState(false);
+  const [setup, setSetup] = useState(false);
+  const [loading, setLoading] = useState(desktop);
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, [page]);
+  const refresh = useCallback(async () => {
+    if (!desktop) return;
+    setChecking(true);
+    await perform(async () =>
+      setVersions(await call<EngineVersion[]>("engine_versions")),
+    );
+    setChecking(false);
+  }, []);
+  useEffect(() => {
+    if (!desktop) return;
+    let disposed = false;
+    const disposers: (() => void)[] = [];
+    const load = async () => {
+      try {
+        const off = await listen<Database>("state:changed", (e) =>
+          setDb(e.payload),
+        );
+        if (disposed) {
+          off();
+          return;
+        }
+        disposers.push(off);
+        const closeOff = await listen("app:close-requested", () =>
+          setClose(true),
+        );
+        if (disposed) {
+          closeOff();
+          return;
+        }
+        disposers.push(closeOff);
+        const value = await call<Database>("get_state");
+        if (!disposed) {
+          setDb(value);
+          setSetup(!value.settings.setupComplete);
+          void refresh();
+        }
+      } catch (e) {
+        useApp.getState().fail(e);
+      } finally {
+        if (!disposed) setLoading(false);
+      }
+    };
+    const patches = async () => {
+      const off = await listen<Partial<Job> & { id: string }>(
+        "state:job",
+        (e) => {
+          const current = useApp.getState().db;
+          if (current)
+            setDb({
+              ...current,
+              jobs: current.jobs.map((j) =>
+                j.id === e.payload.id ? { ...j, ...e.payload } : j,
+              ),
+            });
+        },
+      );
+      if (disposed) off();
+      else disposers.push(off);
+      const addedOff = await listen<Job[]>("state:jobs-added", (e) => {
+        const current = useApp.getState().db;
+        if (current) {
+          const jobs = [
+            ...current.jobs,
+            ...e.payload.filter(
+              (j) => !current.jobs.some((old) => old.id === j.id),
+            ),
+          ];
+          const finished = new Set(
+            jobs
+              .filter((j) => terminal(j.status))
+              .slice(-200)
+              .map((j) => j.id),
+          );
+          setDb({
+            ...current,
+            jobs: jobs.filter((j) => !terminal(j.status) || finished.has(j.id)),
+          });
+        }
+      });
+      if (disposed) addedOff();
+      else disposers.push(addedOff);
+      const metricOff = await listen<Diagnostics>("engine:metrics", (e) =>
+        useApp.getState().setMetrics(e.payload),
+      );
+      if (disposed) metricOff();
+      else disposers.push(metricOff);
+      const errorOff = await listen<string>("engine:error", (e) =>
+        useApp.getState().fail(e.payload),
+      );
+      if (disposed) errorOff();
+      else disposers.push(errorOff);
+      const batchOff = await listen<Batch>("state:batch", (e) => {
+        const current = useApp.getState().db;
+        if (current)
+          setDb({
+            ...current,
+            batches: current.batches.map((b) =>
+              b.id === e.payload.id ? e.payload : b,
+            ),
+          });
+      });
+      if (disposed) batchOff();
+      else disposers.push(batchOff);
+    };
+    void load();
+    void patches().catch((e) => useApp.getState().fail(e));
+    return () => {
+      disposed = true;
+      disposers.forEach((f) => f());
+    };
+  }, [setDb, refresh]);
+  useEffect(() => {
+    const theme = db?.settings.theme || "dark";
+    const media = window.matchMedia("(prefers-color-scheme: light)");
+    const apply = () =>
+      (document.documentElement.dataset.theme =
+        theme === "system" ? (media.matches ? "light" : "dark") : theme);
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [db?.settings.theme]);
+  const count = db?.jobs.filter((j) => active(j.status)).length || 0;
+  const job = db?.jobs.find((j) => j.id === selected) || selectedJob;
+  const nav: { page: Page; label: string; Icon: typeof Download }[] = [
+    { page: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
+    { page: "downloads", label: "Downloads", Icon: Download },
+    { page: "history", label: "History", Icon: History },
+    { page: "settings", label: "Settings", Icon: Settings },
+    { page: "about", label: "About", Icon: Info },
+  ];
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <button className="brand" onClick={() => navigate("dashboard")}>
+          <span className="brand-icon">
+            <img src="/ythub-icon.png" alt="" />
+          </span>
+          <span>
+            YT<span className="brand-light">Hub</span>
+            <small>YOUR YOUTUBE MEDIA HUB</small>
+          </span>
+        </button>
+        <div className="sidebar-label">WORKSPACE</div>
+        <nav aria-label="Main navigation">
+          {nav.map(({ page: p, label, Icon }) => (
+            <button
+              key={p}
+              className={`nav-item ${page === p ? "active" : ""}`}
+              aria-current={page === p ? "page" : undefined}
+              onClick={() => navigate(p)}
+            >
+              <Icon size={19} />
+              {label}
+              {p === "downloads" && count > 0 && (
+                <span className="nav-count">{count}</span>
+              )}
+              {page === p && <ChevronRight className="nav-arrow" size={15} />}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="engine-indicator">
+            <span
+              className={
+                versions.length && versions.every((v) => !v.error)
+                  ? "ready"
+                  : ""
+              }
+            />
+            <div>
+              <strong>
+                {versions.length
+                  ? versions.some((v) => v.error)
+                    ? "Engine needs attention"
+                    : "Engine ready"
+                  : "Local media engine"}
+              </strong>
+              <small>Powered by yt-dlp + FFmpeg</small>
+            </div>
+          </div>
+          <button
+            className="sidebar-folder"
+            onClick={() =>
+              void perform(() => call("open_output", { kind: "downloads" }))
+            }
+          >
+            Open download folder <ArrowUpRight size={15} />
+          </button>
+          <div className="version">
+            YTHub <span>v1.0.0</span>
+          </div>
+        </div>
+      </aside>
+      <div className="main-shell">
+        <header className="topbar">
+          <div>
+            <span className="muted">Workspace</span>
+            <ChevronRight size={13} />
+            <span>{nav.find((n) => n.page === page)?.label}</span>
+          </div>
+          <div className="topbar-right">
+            <span className="privacy">
+              <CircleCheck size={14} />
+              Local & private
+            </span>
+            <button
+              className="icon-button"
+              title="Settings"
+              aria-label="Settings"
+              onClick={() => navigate("settings")}
+            >
+              <Settings size={18} />
+            </button>
+          </div>
+        </header>
+        <main>
+          {!desktop && (
+            <div className="browser-notice">
+              <Info size={17} />
+              Interface preview. Launch the Windows app to connect to the real
+              local download engine.
+            </div>
+          )}
+          {error && (
+            <div className="alert" role="alert">
+              <div>
+                <strong>Something needs attention</strong>
+                <p>{error}</p>
+              </div>
+              <button
+                className="icon-button"
+                aria-label="Dismiss error"
+                onClick={clearError}
+              >
+                <X size={17} />
+              </button>
+            </div>
+          )}
+          {message && (
+            <div className="notice" role="status">
+              <CircleCheck size={17} />
+              <p>{message}</p>
+              <button
+                className="icon-button"
+                aria-label="Dismiss notification"
+                onClick={() => notify(null)}
+              >
+                <X size={17} />
+              </button>
+            </div>
+          )}
+          {loading ? (
+            <div className="loading">
+              <LoaderCircle className="spin" size={28} />
+              <p>Opening your media hub…</p>
+            </div>
+          ) : (
+            <>
+              {page === "dashboard" && <Dashboard onSelect={setSelected} />}{" "}
+              {page === "downloads" && <Downloads onSelect={setSelected} />}{" "}
+              {page === "history" && (
+                <Downloads history onSelect={setSelected} />
+              )}{" "}
+              {page === "settings" &&
+                (db ? (
+                  <SettingsPage
+                    versions={versions}
+                    refresh={() => void refresh()}
+                    checking={checking}
+                  />
+                ) : (
+                  <div className="card empty">
+                    <h2>Desktop settings</h2>
+                    <p>
+                      Open the Windows application to configure local folders,
+                      media engines, and download preferences.
+                    </p>
+                  </div>
+                ))}{" "}
+              {page === "about" && (
+                <div className="about-page">
+                  <span className="brand-icon large">
+                    <img src="/ythub-icon.png" alt="YTHub" />
+                  </span>
+                  <h1>
+                    YTHub<span className="accent">.</span>
+                  </h1>
+                  <p className="about-tagline">Your YouTube Media Hub</p>
+                  <p>
+                    A local Windows media downloader powered by yt-dlp and
+                    FFmpeg.
+                    <br />
+                    Built with Tauri, Rust, React, and TypeScript.
+                  </p>
+                  <div className="card about-card">
+                    <h2>
+                      Application version <span className="muted">1.0.0</span>
+                    </h2>
+                    <EnginePanel
+                      versions={versions}
+                      busy={checking}
+                      refresh={() => void refresh()}
+                    />
+                  </div>
+                  <p>
+                    YTHub is licensed under MIT. yt-dlp is released under the
+                    Unlicense,
+                    <br />
+                    with bundled dependencies under their respective licenses.
+                    <br />
+                    The bundled FFmpeg distribution is GPL; source and license
+                    links are in THIRD_PARTY_NOTICES.md.
+                  </p>
+                  <p className="muted">
+                    Only download content you have permission to download and
+                    use.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+          <footer>
+            Only download content you have permission to download and use.
+            <span>
+              <span className="footer-dot" />
+              Made for your offline moments
+            </span>
+          </footer>
+        </main>
+      </div>
+      {job && <JobDetails job={job} onClose={() => setSelected(null)} />}
+      {close && (
+        <Modal
+          title={count ? "Downloads are still active" : "Close YTHub?"}
+          onClose={() => setClose(false)}
+        >
+          <p>
+            Keep YTHub in the tray to continue downloading, or exit and retain
+            partial files for your next session.
+          </p>
+          <div className="button-row">
+            <button className="secondary" onClick={() => setClose(false)}>
+              Keep downloading
+            </button>
+            <button
+              className="secondary"
+              onClick={() =>
+                void perform(async () => {
+                  await call("window_action", { action: "hide" });
+                  setClose(false);
+                })
+              }
+            >
+              Minimize to tray
+            </button>
+            <button
+              className="primary"
+              onClick={() =>
+                void perform(() => call("window_action", { action: "quit" }))
+              }
+            >
+              Exit & pause downloads
+            </button>
+          </div>
+        </Modal>
+      )}
+      {setup && db && page !== "settings" && (
+        <Modal title="Welcome to YTHub" onClose={() => setSetup(false)}>
+          <p>
+            Everything runs on your computer. Let’s check your media engine
+            before the first download.
+          </p>
+          <EnginePanel
+            versions={versions}
+            busy={checking}
+            refresh={() => void refresh()}
+          />
+          <div className="destination">
+            <Download size={18} />
+            <div>
+              <small>DOWNLOAD FOLDER</small>
+              <span>{db.settings.downloadDir}</span>
+            </div>
+          </div>
+          <div className="button-row">
+            <button
+              className="secondary"
+              onClick={() => {
+                setSetup(false);
+                navigate("settings");
+              }}
+            >
+              Configure folders & engines
+            </button>
+            <button
+              className="primary"
+              disabled={
+                checking || versions.length < 3 || versions.some((v) => v.error)
+              }
+              onClick={() =>
+                void perform(async () => {
+                  await call("save_settings", {
+                    settings: { ...db.settings, setupComplete: true },
+                  });
+                  setSetup(false);
+                })
+              }
+            >
+              Continue <ArrowUpRight size={16} />
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,1 @@
+{"main":{"identifier":"main","description":"Only the main local window may invoke the application and native picker commands.","local":true,"windows":["main"],"permissions":["core:default","dialog:allow-open","dialog:allow-confirm"]}}
