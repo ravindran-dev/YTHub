@@ -1,80 +1,169 @@
-# YTHub
+<div align="center">
+  <img src="public/ythub-icon.png" alt="YTHub" width="96" />
+  <h1>YTHub</h1>
+  <p><strong>Download. Convert. Manage. Play.</strong></p>
+  <p>A local-first media downloader for Windows and Android, with a native Android music library and player.</p>
+</div>
 
-**Your YouTube Media Hub** — a Windows desktop application for local YouTube MP3, video, and playlist downloads. React/TypeScript renders the interface; Tauri commands invoke a Rust queue that runs standalone yt-dlp and FFmpeg. No hosted backend, accounts, remote database, Python installation, or simulated downloads.
+YTHub analyzes YouTube media, manages downloads and conversion, and keeps files on your device. Windows uses React, TypeScript, Tauri and Rust. Android is a separate native Kotlin/Jetpack Compose application with Media3 playback. Neither application requires a YTHub account or a hosted application backend. Online analysis and downloads contact external media services; local music playback works offline.
+
+## Platforms
+
+| Platform | Application | Build requirements | Distribution |
+| --- | --- | --- | --- |
+| Android 8+ | Kotlin, Jetpack Compose, Media3 | JDK 17, Android SDK 36 | Development APK; production signing required |
+| Windows x64 | React 19, TypeScript, Tauri 2, Rust | Node.js 22.16+, Rust/MSVC, C++ Build Tools, Windows SDK, WebView2 | NSIS installer or portable package |
+| iOS | No target in this repository | — | — |
 
 ## Features
 
-- Analyze videos, playlists, and channel lists with the real yt-dlp metadata extractor.
-- MP3 at 128/192/256/320 kbps or best VBR, metadata and optional cover art. A higher encoding bitrate does not increase source fidelity.
-- MP4/MKV, best quality or resolution caps, stream merge/remux, optional preference for H.264/AAC.
-- Lazy playlist staging up to 10,000 items, priority/fairness, isolated partial data, classified retries, pause/resume, process-tree cancellation, and 1–6 concurrent downloads (advanced: 12).
-- Separate bounded conversion and ZIP workers, aggregate bandwidth/fragment budgets, host cooldowns, resource reservations, and live engine diagnostics.
-- Streamed ZIP64 archives, disk checks, incomplete archive policy, optional source-folder cleanup.
-- Local persistent history and settings, native folder/file selection, tray controls, notifications, startup preferences, custom engines, and a writable yt-dlp updater.
-- Dark/light/system themes, accessible native dialogs, keyboard focus, searchable downloads, progress/speed/ETA from engine output.
+### Download and organize
 
-## Interface screenshots
+- Analyze individual videos and playlists using yt-dlp metadata.
+- Save MP3 audio or video with quality selection, conversion and optional metadata/artwork.
+- Track real download progress, processing, export, completion and failure states.
+- Pause, resume, cancel and retry downloads; inspect history and errors.
+- Package playlist outputs as ZIP archives and choose local output locations.
+- Keep preferences and task history locally, with recovery of interrupted work.
 
-The Dashboard, Downloads, History, Settings, and About screens are implemented. Desktop screenshots can be added here after reviewing the app on your preferred DPI and window size; no fabricated download activity is used in the interface.
+Queue policies, storage mechanisms and platform integration differ between Android and Windows; see the [architecture](docs/architecture.md).
 
-## Windows development
+### Native Android music
 
-Requirements: modern x64 Windows, Node.js **22.16+**, Rust stable with the MSVC target, Visual Studio C++ Build Tools and Windows SDK, and Microsoft Edge WebView2 Runtime. The installer bootstraps WebView2 when needed. Network access is needed to download dependencies and media engines.
+- Play completed audio downloads or browse existing phone music through Android's audio index.
+- Search and organize tracks, playlists, favorites and recent listening history.
+- Use a persistent mini-player, full player, seek and media-volume sliders, queue, shuffle/repeat, playback speed, local lyrics and sleep timer.
+- Continue playback through the service-owned Media3 engine while navigating the app.
+- Access capability-aware audio effects; unsupported features are explained or disabled.
+- Navigate through Home, Downloads, Library and Settings with animated glass surfaces, native blur on Android 12+, adaptive text and system-safe spacing.
+
+See [player behavior and persistence](docs/MUSIC_PLAYER.md) and the [device audit](docs/MUSIC_PLAYER_AUDIT.md) for tested behavior and platform limitations.
+
+## Get started
+
+Clone the repository:
+
+```sh
+git clone https://github.com/ravindran-dev/YTHub.git
+cd YTHub
+```
+
+### Android
+
+Install JDK 17 and Android SDK platform 36. Set `ANDROID_HOME` or configure the ignored `android/local.properties` file. The first build needs network access for dependencies.
+
+```sh
+./android/gradlew -p android :app:assembleDebug
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+On Windows, use `android\gradlew.bat -p android :app:assembleDebug`. Debug builds use your local Android development key; preserve it to install updates without uninstalling. An APK signed with another key cannot replace the existing installation directly.
+
+Open **Library → Phone music** to grant audio access and select existing songs. A playlist's **+** adds phone music to that playlist. Source files stay in place.
+
+Full instructions: [Android development](android/README.md).
+
+### Windows
+
+Run in PowerShell on a configured Windows development machine:
 
 ```powershell
-npm install
+npm ci
 npm run engines:install
 npm run tauri dev
 ```
 
-`npm run dev` opens a browser UI preview; real downloads require the Tauri desktop app. The preview explicitly indicates that it has no desktop access. `npm run build` compiles the web assets only.
+`npm run dev` starts a browser preview. Native downloads require the Tauri application. Engine provisioning downloads and verifies the Windows yt-dlp, FFmpeg, FFprobe and Deno resources.
 
-## Production packaging
+Full instructions: [Windows development](docs/windows-development.md), [engine provisioning](docs/download-engine.md), [packaging](docs/packaging.md).
+
+## Architecture
+
+The applications share product identity and media workflows, while each platform owns its native runtime and persistence.
+
+| Layer | Android | Windows |
+| --- | --- | --- |
+| Interface | Compose screens, adaptive layouts, motion/glass components | React pages, typed API boundary, Zustand |
+| Downloads | `DownloadStore` and foreground `DownloadService` | Rust manager, bounded download/processing/archive pools |
+| Playback | One service-owned ExoPlayer and MediaSession | Android player is not a desktop feature |
+| Durable state | Atomic music JSON, download JSON, SharedPreferences | SQLite queue/history and compact playlist manifests |
+| Files | MediaStore, SAF grants, private imports, FileProvider | Validated local paths and native filesystem operations |
+| Media tools | youtubedl-android / FFmpeg integration | Provisioned standalone Windows executables |
+
+Read the [architecture guide](docs/architecture.md) for component boundaries, data flows, recovery and extension rules.
+
+```text
+android/                 Native Android app, services, tests and licensing
+src/                     React interface, API boundary, store and utilities
+src-tauri/               Rust desktop runtime and media pipeline
+scripts/                 Windows engine provisioning and packaging
+tests/                   Frontend regression tests
+docs/                    Architecture, operations and verification reports
+.github/workflows/       Android and Windows build validation
+```
+
+## Development checks
+
+Frontend:
+
+```sh
+npm ci
+npm run lint
+npm test
+npm run build
+```
+
+Android:
+
+```sh
+./android/gradlew -p android :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest
+# Requires an authorized Android device or emulator:
+./android/gradlew -p android :app:connectedDebugAndroidTest
+```
+
+Desktop native checks run on Windows:
 
 ```powershell
-npm run engines:install
-npm run build
-cargo check --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml
-npm test
-npm run lint
 npm run tauri build
 ```
 
-The executable is `src-tauri/target/release/ythub.exe`. NSIS installers are in `src-tauri/target/release/bundle/nsis/`. `scripts/package-portable.ps1` creates a portable folder/ZIP containing the executable and engine resources. A portable build still uses the normal per-user application-data directory for preferences and requires WebView2. Local installers are unsigned unless you configure a signing certificate; Windows may show publisher reputation prompts.
+Instrumentation includes generated local audio and metadata fixtures; it does not download thousands of online videos. Some physical/background/network tests are opt-in and are not verified by a default test run. CI build success does not establish physical-device acceptance.
 
-## Engine provisioning
+## Verification and limitations
 
-`scripts/provision-engines.ps1` retrieves standalone x64 Windows yt-dlp, FFmpeg, FFprobe, and Deno (YouTube JavaScript challenges) from their upstream GitHub releases. Assets must match GitHub's SHA256 digest. The source URLs/version/digests are recorded in `binaries/manifest.json`. Executables are ignored by Git and bundled as resources during packaging. Python is bundled in the upstream yt-dlp executable. Custom executable paths are supported in Settings. The yt-dlp updater copies the bundled engine into the user's application-data directory before updating, avoiding writes to Program Files.
+- [Android integration audit](docs/MUSIC_PLAYER_AUDIT.md): playback, persistence, offline media, download integration and background-service checks.
+- [Mobile UI and motion audit](docs/UI_COMPACT_AUDIT.md): device tests, responsive layouts, glass rendering, frame samples and remaining performance limits.
+- [Windows verification](docs/verification.md): dated scheduler, media, archive and packaging results.
 
-Read [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) before redistributing the bundled GPL FFmpeg build; corresponding-source obligations apply. Upstream release archives and exact build recipes must accompany your distribution process.
+Android lock-screen controls, Bluetooth/headset behavior, real interruptions and OEM background restrictions still require broader physical-device acceptance. Crossfade, virtualizer and loudness normalization are not implemented. Audio-effect availability varies by device. Frame samples include occasional slow frames; sustained 60fps is not certified.
 
-## Structure
+YouTube availability and authentication requirements can change; an engine update may be necessary. No iOS application is included. Production Android signing and Windows code signing require publisher-controlled credentials.
 
-```text
-src/                 React pages, components, API boundary, store, types, utilities
-src-tauri/src/       Rust command boundary, queue/process manager, engine wrapper,
-                     archive service, models, persistent storage and validation
-src-tauri/binaries/  Provisioned local engine resources (ignored executables)
-scripts/             Windows engine provisioning and portable packaging
-tests/               URL boundary and frontend queue/progress/settings tests
-docs/                Implementation architecture and operational notes
-```
+## Documentation
 
-Default output: `Downloads/YTHub/{Audio,Video,Playlists,ZIP,Temp}`. Logs, compact playlist manifests and `state.sqlite3` live in `%APPDATA%/dev.ravindran.ythub` (the OS path resolved by Tauri). The previous JSON state migrates automatically and is preserved. Settings include local cookies/proxy paths; these are not encrypted. Cookies content, credentials, complete command lines, and media bytes are never logged. Media bytes are never sent to React; settings remain accessible to the local settings UI.
+| Topic | Guide |
+| --- | --- |
+| System design | [Architecture](docs/architecture.md) |
+| Android build and permissions | [Android README](android/README.md) |
+| Android music integration | [Music player](docs/MUSIC_PLAYER.md) |
+| Download pipeline | [Download engine](docs/download-engine.md) |
+| Scheduling and recovery | [Concurrency](docs/concurrency.md), [reliability](docs/reliability.md), [recovery](docs/recovery.md) |
+| Distribution | [Packaging](docs/packaging.md), [Windows development](docs/windows-development.md) |
+| Troubleshooting | [Troubleshooting](docs/troubleshooting.md) |
 
-## Testing and verification
+## Contributing
 
-Rust tests cover filenames, write probes, persistence/recovery, metadata parsing, quality and argument validation, progress parsing, and streaming ZIP ordering/cancellation. React tests cover URL validation, progress values, task rendering, and queue empty states. See `docs/verification.md` for the actual validation results and external-access limitations from this build.
+Keep native media work out of presentation components. Preserve track identity, playlist ordering, source files and durable state when changing UI or import flows. Include appropriate regression checks, explain platform limitations, and distinguish device verification from emulator or fixture tests. Never commit signing keys, cookies, credentials, downloaded media or local build artifacts.
 
-## Troubleshooting
+## Maintainer
 
-- **Engine missing**: provision engines or choose custom `.exe` paths, save Settings, then check versions.
-- **YouTube unavailable / bot challenge**: update yt-dlp and verify Deno. If you have legitimate access, explicitly supply your own Netscape-format cookies file. Browser cookies are never read automatically.
-- **Resume**: retained `.part` files are reused by yt-dlp. Pausing terminates the process tree; conversion restarts safely from available source material.
-- **ZIP disk error**: restore free space and write permission in the playlist's recorded ZIP folder, then retry ZIP in History. Folder preferences apply to newly queued playlists; successful media is retained when packaging fails.
-- **Folder permission error**: use a writable local folder; all three storage locations are probed before new jobs.
-- **State interruption**: unfinished tasks restore as Interrupted. Resume them explicitly. SQLite retains staged media and playlist cursors; legacy JSON files remain preserved after migration.
+[Ravindran — @ravindran-dev](https://github.com/ravindran-dev) · [ravindrans.dev@gmail.com](mailto:ravindrans.dev@gmail.com)
 
-Only download content you have permission to download and use. No DRM bypass features are included.
+## License
+
+The Windows application and root project are [MIT licensed](LICENSE). The Android application is [GPL-3.0 licensed](android/LICENSE) because of its linked media dependencies. Preserve the [root third-party notices](THIRD_PARTY_NOTICES.md), [Android notices](android/THIRD_PARTY_NOTICES.md) and [Inter font license](android/licenses/Inter-OFL.txt) when distributing builds. The Android package must not be described as MIT-only.
+
+Use downloaded content only with the rights or permissions required for your use.

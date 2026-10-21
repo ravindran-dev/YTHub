@@ -10,6 +10,8 @@ export default tseslint.config(
       "node_modules/**",
       "node_modules.previous/**",
       "artifacts/**",
+      "android/**/build/**",
+      "android/.gradle/**",
     ],
   },
   js.configs.recommended,

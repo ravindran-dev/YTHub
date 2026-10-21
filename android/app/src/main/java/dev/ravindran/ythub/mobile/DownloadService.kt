@@ -46,11 +46,13 @@ class DownloadService : Service() {
         }
         private fun openIntent(context: Context): PendingIntent = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         fun notifyFinished(context: Context, item: DownloadItem) {
-            if (!DownloadStore.prefs.value.notifications) return
+            if (!DownloadStore.prefs.value.notifications || (item.audio && item.media.playlist && !MusicRepository.state.value.settings.notifyPlaylist)) return
             channels(context)
             runCatching { context.getSystemService(NotificationManager::class.java).notify(item.id.hashCode(), NotificationCompat.Builder(context, "completed")
                 .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle("Download complete")
-                .setContentText(item.media.title).setContentIntent(openIntent(context)).setAutoCancel(true).build()) }
+                .setContentText(item.media.title).setContentIntent(openIntent(context)).setAutoCancel(true).apply {
+                    if (item.audio && item.uris.isNotEmpty()) addAction(android.R.drawable.ic_media_play, "Play now", PendingIntent.getActivity(context, item.id.hashCode(), Intent(context, MainActivity::class.java).putExtra("play_download", item.id), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+                }.build()) }
         }
     }
 }

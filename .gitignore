@@ -16,5 +16,14 @@ android/.gradle/
 android/.kotlin/
 android/**/build/
 android/local.properties
-android/*.jks
-android/*.keystore
+
+# Local credentials, cookies and release signing material
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+**/keystore.properties
+**/cookies.txt

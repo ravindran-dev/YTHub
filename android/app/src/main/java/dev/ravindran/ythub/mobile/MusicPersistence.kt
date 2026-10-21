@@ -1,0 +1,40 @@
+package dev.ravindran.ythub.mobile
+
+import com.google.gson.Gson
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import java.io.File
+
+/** Additive v1 migration; unreadable/future data is never overwritten by the repository. */
+internal object MusicPersistence {
+    private val gson = Gson()
+    fun decode(text: String): MusicState {
+        val incoming = JsonParser.parseString(text).asJsonObject
+        val version = incoming.get("version")?.asInt ?: 1
+        require(version in 1..2) { "Unsupported library version $version" }
+        val defaults = gson.toJsonTree(MusicState()).asJsonObject
+        fun merge(target: JsonObject, source: JsonObject) {
+            source.entrySet().forEach { (key, value) ->
+                require(!value.isJsonNull) { "Invalid null value for $key" }
+                if (value.isJsonObject && target.get(key)?.isJsonObject == true) merge(target.getAsJsonObject(key), value.asJsonObject)
+                else target.add(key, value)
+            }
+        }
+        merge(defaults, incoming)
+        val state = gson.fromJson(defaults, MusicState::class.java)
+        require(state.tracks.all { it.id.isNotBlank() && it.uri.isNotBlank() && it.title.isNotBlank() }) { "Invalid track metadata" }
+        val settings = state.settings.copy(
+            speed = state.settings.speed.takeIf { it in listOf(.5f, .75f, 1f, 1.25f, 1.5f, 1.75f, 2f) } ?: 1f,
+            bass = state.settings.bass.coerceIn(0, 1000),
+            skipForward = state.settings.skipForward.coerceIn(5, 60), skipBackward = state.settings.skipBackward.coerceIn(5, 60),
+            libraryLayout = state.settings.libraryLayout.takeIf { it in listOf("Grid", "Compact") } ?: "Grid")
+        return state.copy(version = 2, tracks = state.tracks.distinctBy { it.id }, queueIndex = state.queueIndex.coerceIn(0, (state.queue.size - 1).coerceAtLeast(0)),
+            position = state.position.coerceAtLeast(0), repeat = state.repeat.coerceIn(0, 2), settings = settings)
+    }
+    /** Disk cache uses oldest-write eviction; metadata/lyrics never depend on cache retention. */
+    @Synchronized fun trimArtwork(directory: File, limit: Long = 64L * 1024 * 1024) {
+        val files = directory.listFiles()?.filter { it.isFile }?.sortedBy { it.lastModified() }.orEmpty()
+        var bytes = files.sumOf { it.length() }
+        for (file in files) { if (bytes <= limit) break; val size = file.length(); if (file.delete()) bytes -= size }
+    }
+}

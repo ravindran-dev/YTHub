@@ -1,4 +1,4 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 package dev.ravindran.ythub.mobile
 
 import android.Manifest
@@ -30,6 +30,13 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,6 +51,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,10 +69,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val Crimson = Color(0xFFFF173D)
+private val Crimson = MobileUi.accent
 private val Success = Color(0xFF34D399)
-private val PagePadding = 20.dp
-private val CardShape = RoundedCornerShape(20.dp)
+private val PagePadding = MobileUi.page
+internal val LocalMusicBottomPadding = staticCompositionLocalOf { 112.dp }
+private val CardShape = MobileUi.card
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,8 +82,13 @@ class MainActivity : ComponentActivity() {
         receiveShare(intent)
         setContent { YTHubApp() }
     }
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations && !MusicRepository.state.value.settings.background) MusicPlayback.pauseIfConnected()
+    }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); receiveShare(intent) }
     private fun receiveShare(intent: Intent?) {
+        intent?.getStringExtra("play_download")?.let { MusicPlayback.downloadToPlay.value = it; intent.removeExtra("play_download") }
         if (intent?.action == Intent.ACTION_SEND) {
             val text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
             val link = Regex("https://[^\\s]+").find(text)?.value.orEmpty()
@@ -84,8 +98,13 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable private fun YTHubApp() {
+    val musicReady by MusicRepository.ready.collectAsStateWithLifecycle()
+    if (!musicReady) { Box(Modifier.fillMaxSize().background(MobileUi.background), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = MobileUi.accent) }; return }
     val preferences by DownloadStore.prefs.collectAsStateWithLifecycle()
     val jobs by DownloadStore.items.collectAsStateWithLifecycle()
+    val musicMessage by MusicRepository.message.collectAsStateWithLifecycle()
+    val playDownload by MusicPlayback.downloadToPlay.collectAsStateWithLifecycle()
+    val playerError by MusicPlayback.error.collectAsStateWithLifecycle()
     val engine by DownloadStore.engine.collectAsStateWithLifecycle()
     val shared by DownloadStore.sharedUrl.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -97,11 +116,20 @@ class MainActivity : ComponentActivity() {
         (context as? ComponentActivity)?.enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
         onDispose { }
     }
-    val scheme = if (dark) darkColorScheme(primary = Crimson, onPrimary = Color.White, background = Color(0xFF0B0C10), surface = Color(0xFF16181F),
-        surfaceVariant = Color(0xFF22252E), onSurface = Color(0xFFF8F8FA), onSurfaceVariant = Color(0xFFA3A8B6), outline = Color(0xFF353946))
-    else lightColorScheme(primary = Crimson, onPrimary = Color.White, background = Color(0xFFF6F5F3), surface = Color.White,
+    val scheme = if (dark) darkColorScheme(primary = Crimson, onPrimary = Color.White, secondary = Crimson, onSecondary = Color.White, secondaryContainer = Color(0xFF3A1420), onSecondaryContainer = Color.White, background = MobileUi.background, surface = MobileUi.surface,
+        surfaceVariant = MobileUi.elevated, onSurface = Color(0xFFF8F8FA), onSurfaceVariant = Color(0xFFA3A8B6), outline = Color(0xFF353946))
+    else lightColorScheme(primary = Crimson, onPrimary = Color.White, secondary = Crimson, secondaryContainer = Color(0xFFFFDDE4), onSecondaryContainer = Color(0xFF6C1027), background = Color(0xFFF6F5F3), surface = Color.White,
         surfaceVariant = Color(0xFFEEECEF), onSurface = Color(0xFF171923), onSurfaceVariant = Color(0xFF696B77), outline = Color(0xFFD9D7DD))
+    val pageState = rememberSaveableStateHolder()
+    val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    var librarySearch by remember { mutableStateOf(false) }
     var page by rememberSaveable { mutableStateOf("Home") }
+    var playerOrigin by rememberSaveable { mutableStateOf("Library") }
+    var settingsOrigin by rememberSaveable { mutableStateOf("Settings") }
+    var secondaryOrigin by rememberSaveable { mutableStateOf("Settings") }
+    fun openPlayer() { if (page != "Player") playerOrigin = page; page = "Player" }
+    fun openSecondary(destination: String) { secondaryOrigin = page; page = destination }
+    fun openPlayerSettings() { settingsOrigin = page; page = "Player Settings" }
     var detail by rememberSaveable { mutableStateOf<String?>(null) }
     var media by remember { mutableStateOf<MediaInfo?>(null) }
     var url by rememberSaveable { mutableStateOf("") }
@@ -111,9 +139,21 @@ class MainActivity : ComponentActivity() {
     var analyzing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
+    val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(notice) { notice?.let { snackbar.showSnackbar(it); notice = null } }
     var qualitySheet by remember { mutableStateOf(false) }
     var confirmCancel by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    LaunchedEffect(playDownload) {
+        playDownload?.let { id ->
+            val ids = runCatching { MusicRepository.downloadedTracks(id) }.getOrDefault(emptyList())
+            if (ids.isNotEmpty()) { MusicPlayback.play(ids); openPlayer(); detail = null } else error = "Audio unavailable. Open Library to rescan or extract an archived playlist."
+            MusicPlayback.downloadToPlay.value = null
+        }
+    }
+    LaunchedEffect(musicMessage) { if (musicMessage != null) { error = musicMessage; MusicRepository.message.value = null } }
+    LaunchedEffect(playerError) { if (playerError != null) { error = playerError; MusicPlayback.error.value = null } }
+    LaunchedEffect(Unit) { if (MusicRepository.state.value.settings.restoreTrack) MusicPlayback.restore() }
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) runCatching {
@@ -141,39 +181,47 @@ class MainActivity : ComponentActivity() {
             media = null; page = "Downloads"; notice = if (preferences.autoStart) "Added to your download queue" else "Added paused · tap resume to start"
         }
     }
-    BackHandler(enabled = detail != null || media != null || page !in listOf("Home", "Downloads", "History", "Settings")) {
-        if (detail != null) detail = null else if (media != null) media = null else page = "Settings"
+    BackHandler(enabled = detail != null || media != null || page != "Home") {
+        if (detail != null) detail = null else if (media != null) media = null else page = when (page) { "Player Settings" -> settingsOrigin; "Player" -> playerOrigin; "Storage", "History", "Logs" -> secondaryOrigin; "Downloads", "Library", "Settings" -> "Home"; else -> "Settings" }
     }
-    MaterialTheme(colorScheme = scheme, typography = Typography(
-        headlineLarge = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-        headlineSmall = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))) {
+    MaterialTheme(colorScheme = scheme, typography = musicTypography()) {
         Surface(Modifier.fillMaxSize(), color = scheme.background) {
             if (!preferences.onboardingDone) {
                 Onboarding(engine) { DownloadStore.savePrefs(preferences.copy(onboardingDone = true)) }
             } else {
-                Scaffold(containerColor = scheme.background, bottomBar = {
-                    if (media == null && detail == null && page in listOf("Home", "Downloads", "History", "Settings")) {
-                        GlassNavigationBar(page, { page = it }, dark, screenBackdrop, contentOrigin)
+                Scaffold(containerColor = scheme.background, snackbarHost = { SnackbarHost(snackbar) }, bottomBar = {
+                    if (page != "Player" && !keyboardOpen) {
+                        Column {
+                            MusicMiniPlayer(screenBackdrop, contentOrigin, dark) { openPlayer() }
+                            GlassNavigationBar(if (page in listOf("Home", "Downloads", "Library", "Settings")) page else "Settings", { page = it; detail = null; media = null }, dark, screenBackdrop, contentOrigin)
+                        }
                     }
                 }, topBar = {
-                    Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = PagePadding, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (media != null || detail != null || page !in listOf("Home", "Downloads", "History", "Settings")) {
-                            IconButton(onClick = { if (detail != null) detail = null else if (media != null) media = null else page = "Settings" }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Go back") }
-                            Text(if (detail != null) "Download details" else if (media != null) if (media!!.playlist) "Playlist details" else "Media details" else page, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    if (page == "Player" && detail == null && media == null) Spacer(Modifier.statusBarsPadding()) else Row(Modifier.fillMaxWidth().statusBarsPadding().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).padding(horizontal = PagePadding, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (media != null || detail != null || page !in listOf("Home", "Downloads", "Player", "Library", "Settings")) {
+                            IconButton(onClick = { if (detail != null) detail = null else if (media != null) media = null else page = if (page == "Player Settings") settingsOrigin else secondaryOrigin }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Go back") }
+                            Text(if (detail != null) "Download details" else if (media != null) if (media!!.playlist) "Playlist details" else "Media details" else page, fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                         } else {
-                            Image(painterResource(R.drawable.ythub_logo), "YTHub", Modifier.size(38.dp))
-                            Text("YTHub", fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(start = 8.dp).weight(1f))
-                            if (page == "Home") IconButton(onClick = { page = "Settings" }) { Icon(Icons.Default.Settings, "Settings") }
+                            Image(painterResource(R.drawable.ythub_logo), "YTHub", Modifier.size(28.dp))
+                            Text("YTHub", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(start = 8.dp).weight(1f))
+                            if (page == "Library") IconButton(onClick = { librarySearch = true }) { Icon(Icons.Default.Search, "Search music library") }
+                            if (page in listOf("Home", "Library")) IconButton(onClick = { page = "Settings" }) { Icon(Icons.Default.Settings, "Settings") }
                         }
                     }
                 }) { inset ->
-                    AnimatedContent(targetState = when { detail != null -> "detail"; media != null -> "media"; else -> page }, label = "Navigation", modifier = Modifier
-                        .padding(top = inset.calculateTopPadding(), bottom = if (media == null && detail == null && page in listOf("Home", "Downloads", "History", "Settings")) 0.dp else inset.calculateBottomPadding())
+                    val reserveBottom = if (page == "Player" || keyboardOpen) inset.calculateBottomPadding() else 0.dp
+                    val appliedInsets = PaddingValues(top = inset.calculateTopPadding(), bottom = reserveBottom)
+                    CompositionLocalProvider(LocalMusicBottomPadding provides if (page == "Player" || keyboardOpen) 0.dp else inset.calculateBottomPadding()) {
+                    AnimatedContent(targetState = when { detail != null -> "detail"; media != null -> "media"; else -> page }, transitionSpec = { MobileMotion.navigation(initialState, targetState).using(null) }, label = "Navigation", modifier = Modifier
+                        .padding(appliedInsets).consumeWindowInsets(appliedInsets).windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)).imePadding()
                         .fillMaxSize().onGloballyPositioned { contentOrigin = it.positionInRoot() }
                         .drawWithContent {
-                            screenBackdrop.record { this@drawWithContent.drawContent() }
-                            drawLayer(screenBackdrop)
+                            if (page == "Player" || keyboardOpen) drawContent() else {
+                                screenBackdrop.record { this@drawWithContent.drawContent() }
+                                drawLayer(screenBackdrop)
+                            }
                         }) { destination ->
+                        pageState.SaveableStateProvider(destination) {
                         when (destination) {
                             "Home" -> HomeScreen(url, { url = it }, audio, { audio = it; quality = if (it) preferences.audioQuality else preferences.videoQuality }, quality,
                                 { qualitySheet = true }, playlist, { playlist = it }, preferences, engine, analyzing,
@@ -181,23 +229,35 @@ class MainActivity : ComponentActivity() {
                                     analyzing = true
                                     runCatching { DownloadStore.analyze(url, playlist) }.onSuccess { media = it }.onFailure { error = it.message ?: "Unable to analyze this URL" }
                                     analyzing = false
-                                } }, onStorage = { page = "Storage" })
+                                } }, onStorage = { openSecondary("Storage") }, activeCount = jobs.count { !it.terminal }, onDownloads = { page = "Downloads" })
                             "media" -> media?.let { MediaScreen(it, audio, { audio = it; quality = if (it) preferences.audioQuality else preferences.videoQuality }, quality, { qualitySheet = true }, preferences, ::startDownload) }
-                            "Downloads" -> DownloadsScreen(jobs, { detail = it }, { id -> act { DownloadStore.pause(id) } }, { id -> act { DownloadStore.resume(id) } }, { confirmCancel = it }, { page = "Home" })
+                            "Downloads" -> DownloadsScreen(jobs, { detail = it }, { id -> act { DownloadStore.pause(id) } }, { id -> act { DownloadStore.resume(id) } }, { confirmCancel = it }, { page = "Home" },
+                                onPlay = { MusicPlayback.downloadToPlay.value = it }, onAdd = { id -> scope.launch {
+                                    runCatching { MusicRepository.downloadedTracks(id) }.onSuccess { notice = if (it.isEmpty()) "No accessible audio files found" else "Added to your music library" }.onFailure { error = it.message }
+                                } })
+                            "Library" -> MusicLibraryScreen(onPlayer = { openPlayer() }, onDownload = { detail = it }, searchRequested = librarySearch, onSearchConsumed = { librarySearch = false })
+                            "Player" -> NowPlayingScreen(onLibrary = { page = "Library" }, onSettings = { openPlayerSettings() }, onDownload = { detail = it }, onMinimize = { page = playerOrigin })
+                            "Player Settings" -> PlayerSettingsScreen(onStorage = { openSecondary("Storage") })
                             "History" -> HistoryScreen(jobs, { detail = it }, { page = "Home" })
                             "detail" -> jobs.find { it.id == detail }?.let { item -> DownloadDetail(item,
                                 onPause = { act { DownloadStore.pause(item.id) } }, onResume = { act { DownloadStore.resume(item.id) } }, onCancel = { confirmCancel = item.id },
                                 onCopy = { copyText(context, item.media.url); notice = "URL copied" },
-                                onOpen = { act { openMedia(context, item.uris.firstOrNull() ?: item.zipUri, item.mime) } },
+                                onOpen = { if (item.audio && item.state == "Completed") scope.launch {
+                                    val ids = runCatching { MusicRepository.downloadedTracks(item.id) }.getOrDefault(emptyList())
+                                    if (ids.isNotEmpty()) { MusicPlayback.play(ids); detail = null; page = "Player" } else error = "No accessible audio files. If this download is archived, use Extract and import playlist."
+                                } else act { openMedia(context, item.uris.firstOrNull() ?: item.zipUri, item.mime) } },
+                                onExtract = { scope.launch { runCatching { MusicRepository.extractPlaylist(Uri.parse(item.zipUri), item.media.title) }.onSuccess { detail = null; page = "Library" }.onFailure { error = it.message } } },
                                 onZip = { act { openMedia(context, item.zipUri, "application/zip") } },
                                 onFolder = { act { openFolder(context, item.options.folderUri) } },
                                 onRemove = { act { DownloadStore.remove(item.id); detail = null } }) }
-                            "Settings" -> SettingsScreen(preferences, engine, onFolder = { folderPicker.launch(null) }, onStorage = { page = "Storage" },
-                                onCookies = { cookiesPicker.launch(arrayOf("text/plain", "application/octet-stream")) }, onLogs = { page = "Logs" },
+                            "Settings" -> SettingsScreen(preferences, engine, onFolder = { folderPicker.launch(null) }, onStorage = { openSecondary("Storage") },
+                                onPlayer = { openPlayerSettings() }, onHistory = { openSecondary("History") }, onCookies = { cookiesPicker.launch(arrayOf("text/plain", "application/octet-stream")) }, onLogs = { openSecondary("Logs") },
                                 onUpdate = { scope.launch { notice = "Checking for an engine update…"; runCatching { DownloadStore.updateEngine() }.onSuccess { notice = it }.onFailure { error = it.message } } })
                             "Storage" -> StorageScreen(jobs, preferences, onFolder = { folderPicker.launch(null) }, onClear = { scope.launch { runCatching { withContext(Dispatchers.IO) { DownloadStore.clearTemporary() } }.onSuccess { notice = "Cleared ${bytesLabel(it)} of temporary files" }.onFailure { error = it.message } } })
                             "Logs" -> LogScreen(jobs)
                         }
+                        }
+                    }
                     }
                 }
             }
@@ -214,12 +274,6 @@ class MainActivity : ComponentActivity() {
             }
             if (error != null) AlertDialog(onDismissRequest = { error = null }, icon = { Icon(Icons.Default.ErrorOutline, null, tint = Crimson) }, title = { Text("Something needs attention") },
                 text = { Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())) { Text(error!!) } }, confirmButton = { TextButton(onClick = { error = null }) { Text("Got it") } })
-            if (notice != null) {
-                LaunchedEffect(notice) { kotlinx.coroutines.delay(3500); notice = null }
-                Box(Modifier.fillMaxSize().navigationBarsPadding().padding(bottom = 88.dp, start = 20.dp, end = 20.dp), contentAlignment = Alignment.BottomCenter) {
-                    Surface(shape = RoundedCornerShape(14.dp), color = scheme.inverseSurface, shadowElevation = 8.dp) { Text(notice!!, color = scheme.inverseOnSurface, modifier = Modifier.padding(16.dp)) }
-                }
-            }
             if (confirmCancel != null) AlertDialog(onDismissRequest = { confirmCancel = null }, title = { Text("Cancel this download?") },
                 text = { Text("Downloaded parts are kept so you can retry later.") }, dismissButton = { TextButton(onClick = { confirmCancel = null }) { Text("Keep downloading") } },
                 confirmButton = { TextButton(onClick = { act { DownloadStore.cancel(confirmCancel!!) }; confirmCancel = null }) { Text("Cancel download") } })
@@ -228,18 +282,18 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable private fun Onboarding(engine: String, onStart: () -> Unit) {
-    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Spacer(Modifier.weight(1f))
-        Box(Modifier.size(180.dp).background(Brush.radialGradient(listOf(Crimson.copy(alpha = .22f), Color.Transparent)), CircleShape), contentAlignment = Alignment.Center) {
-            Image(painterResource(R.drawable.ythub_logo), "YTHub play and download logo", Modifier.size(130.dp))
+    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Spacer(Modifier.height(20.dp))
+        Box(Modifier.size(100.dp).background(Brush.radialGradient(listOf(Crimson.copy(alpha = .22f), Color.Transparent)), CircleShape), contentAlignment = Alignment.Center) {
+            Image(painterResource(R.drawable.ythub_logo), "YTHub play and download logo", Modifier.size(76.dp))
         }
         Spacer(Modifier.height(24.dp))
-        Text("Your media.\nYour way.", fontSize = 38.sp, lineHeight = 43.sp, fontWeight = FontWeight.ExtraBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Text("Your media.\nYour way.", fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.ExtraBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         Text("Welcome to YTHub", fontSize = 18.sp, modifier = Modifier.padding(top = 20.dp))
         Text("Download. Convert. Manage.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
         Spacer(Modifier.height(24.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("MP3", "MP4", "Playlists", "ZIP").forEach { BadgeText(it) } }
-        Spacer(Modifier.weight(1f))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { listOf("MP3", "MP4", "Playlists", "ZIP").forEach { BadgeText(it) } }
+        Spacer(Modifier.height(20.dp))
         Surface(shape = CardShape, color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) { Icon(if (engine.contains("ready")) Icons.Default.CheckCircle else Icons.Default.Tune, null, tint = if (engine.contains("ready")) Success else Crimson); Text(engine, fontSize = 13.sp, modifier = Modifier.padding(start = 12.dp)) }
         }
@@ -250,57 +304,61 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable private fun HomeScreen(url: String, onUrl: (String) -> Unit, audio: Boolean, onAudio: (Boolean) -> Unit, quality: String, onQuality: () -> Unit,
-    playlist: Boolean, onPlaylist: (Boolean) -> Unit, prefs: Preferences, engine: String, busy: Boolean, onAnalyze: () -> Unit, onStorage: () -> Unit) {
+    playlist: Boolean, onPlaylist: (Boolean) -> Unit, prefs: Preferences, engine: String, busy: Boolean, onAnalyze: () -> Unit, onStorage: () -> Unit,
+    activeCount: Int = 0, onDownloads: () -> Unit = {}) {
     val context = LocalContext.current
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding).padding(bottom = 112.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+    val keyboard = LocalSoftwareKeyboardController.current
+    var advanced by rememberSaveable { mutableStateOf(false) }
+    fun analyze() { keyboard?.hide(); if (!busy && url.isNotBlank() && engine.contains("ready")) onAnalyze() }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding).padding(bottom = LocalMusicBottomPadding.current + 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Column {
-            Text("Make it yours.", style = MaterialTheme.typography.headlineLarge)
-            Text("Save the video. Keep the soundtrack.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+            Text("Download from YouTube", style = MaterialTheme.typography.headlineSmall)
+            Text("Download. Convert. Manage.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
         }
-        CardBlock {
-            Label("YOUTUBE LINK")
-            OutlinedTextField(value = url, onValueChange = onUrl, placeholder = { Text("Paste a YouTube URL", fontSize = 14.sp) }, singleLine = true,
-                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), leadingIcon = { Icon(Icons.Default.Link, null) },
-                trailingIcon = { IconButton(onClick = { if (url.isNotBlank()) onUrl("") else {
-                    val clipboard = context.getSystemService(ClipboardManager::class.java)
-                    onUrl(clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty())
-                } }) { Icon(if (url.isBlank()) Icons.Default.ContentPaste else Icons.Default.Close, if (url.isBlank()) "Paste from clipboard" else "Clear URL") } })
-            PrimaryButton(if (busy) "Analyzing your link…" else "Analyze URL", Icons.Default.Search, onAnalyze, !busy && url.isNotBlank() && engine.contains("ready"))
+        OutlinedTextField(value = url, onValueChange = onUrl, placeholder = { Text("YouTube link", maxLines = 1, overflow = TextOverflow.Ellipsis) }, singleLine = true,
+            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { analyze() }),
+            trailingIcon = { IconButton(onClick = { if (url.isNotBlank()) onUrl("") else {
+                val clipboard = context.getSystemService(ClipboardManager::class.java)
+                onUrl(clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty())
+            } }) { Icon(if (url.isBlank()) Icons.Default.ContentPaste else Icons.Default.Close, if (url.isBlank()) "Paste from clipboard" else "Clear URL") } })
+        PrimaryButton(if (busy) "Analyzing…" else "Analyze link", Icons.Default.Search, ::analyze, !busy && url.isNotBlank() && engine.contains("ready"))
+        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        FormatSelector(audio, onAudio)
+        ChoiceRow("Quality", qualityLabel(audio, quality), Icons.Default.HighQuality, onQuality)
+        Surface(shape = CardShape) {
+            Column(Modifier.padding(horizontal = 12.dp)) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { advanced = !advanced }, verticalAlignment = Alignment.CenterVertically) {
+                    Text("Playlist options", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                    Icon(if (advanced) Icons.Default.ExpandLess else Icons.Default.ExpandMore, if (advanced) "Collapse playlist options" else "Expand playlist options")
+                }
+                if (advanced) {
+                    ToggleRow("Download playlist", "Analyze all items in a playlist", playlist, onPlaylist)
+                    ToggleRow("Create ZIP", "Archive completed media", prefs.autoZip) { DownloadStore.savePrefs(prefs.copy(autoZip = it)) }
+                    ToggleRow("Preserve order", "Number downloaded playlist items", prefs.preserveOrder) { DownloadStore.savePrefs(prefs.copy(preserveOrder = it)) }
+                }
+            }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Label("SAVE AS")
-            FormatSelector(audio, onAudio)
-            ChoiceRow("Quality", qualityLabel(audio, quality), Icons.Default.HighQuality, onQuality)
-        }
-        CardBlock {
-            Label("PLAYLIST OPTIONS")
-            ToggleRow("Download playlist", "Analyze the full playlist", playlist, onPlaylist)
-            ToggleRow("Create ZIP", "One archive, all your media", prefs.autoZip) { DownloadStore.savePrefs(prefs.copy(autoZip = it)) }
-            ToggleRow("Preserve order", "Number files in playlist order", prefs.preserveOrder) { DownloadStore.savePrefs(prefs.copy(preserveOrder = it)) }
-        }
-        Row(Modifier.fillMaxWidth().clip(CardShape).background(MaterialTheme.colorScheme.surface).clickable(onClick = onStorage).padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.FolderOpen, null, tint = Crimson)
-            Column(Modifier.padding(start = 12.dp).weight(1f)) { Text("Saved on your phone", fontWeight = FontWeight.SemiBold); Text(prefs.folderName, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            Icon(Icons.Default.ChevronRight, "Storage")
-        }
-        Text("Analyze a link to preview the media and start downloading.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(4.dp))
+        if (activeCount > 0) OutlinedButton(onClick = onDownloads, modifier = Modifier.fillMaxWidth()) { Text("$activeCount active downloads") }
+        ChoiceRow("Save location", prefs.folderName, Icons.Default.FolderOpen, onStorage)
     }
 }
 
-@Composable private fun MediaScreen(media: MediaInfo, audio: Boolean, onAudio: (Boolean) -> Unit, quality: String, onQuality: () -> Unit, prefs: Preferences, onDownload: () -> Unit) {
-    Column(Modifier.fillMaxSize()) {
+@Composable internal fun MediaScreen(media: MediaInfo, audio: Boolean, onAudio: (Boolean) -> Unit, quality: String, onQuality: () -> Unit, prefs: Preferences, onDownload: () -> Unit) {
+    Column(Modifier.fillMaxSize().padding(bottom = LocalMusicBottomPadding.current)) {
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(PagePadding), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             item {
-                Box(Modifier.fillMaxWidth().aspectRatio(16f / 9).clip(CardShape).background(MaterialTheme.colorScheme.surface)) {
-                    Thumbnail(media.thumbnail, Modifier.fillMaxSize())
-                    if (media.duration > 0) Box(Modifier.align(Alignment.BottomEnd).padding(12.dp)) { BadgeText(durationLabel(media.duration)) }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Thumbnail(media.thumbnail, Modifier.size(width = 96.dp, height = 72.dp).clip(CardShape))
+                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                        Text(media.title, style = MaterialTheme.typography.titleMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        if (media.channel.isNotBlank()) Text(media.channel, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (media.playlist) "${media.count} items · ${media.entries.size} loaded" else durationLabel(media.duration), style = MaterialTheme.typography.labelSmall)
+                    }
                 }
-            }
-            item {
-                Text(media.title, style = MaterialTheme.typography.headlineSmall)
-                Text(media.channel, modifier = Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(if (media.playlist) "${media.count} items · ${media.entries.size} loaded${if (media.count > 500) " · first 500 available" else ""}" else listOfNotNull(media.views.takeIf { it > 0 }?.let { "%,d views".format(it) }, media.uploadDate.takeIf { it.isNotBlank() }?.let { "Uploaded $it" }).joinToString(" · "), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                var expanded by remember { mutableStateOf(false) }
+                TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Less details" else "Full details") }
+                if (expanded) { Text(media.title); Text(media.url, style = MaterialTheme.typography.bodySmall) }
             }
             item { FormatSelector(audio, onAudio) }
             item { ChoiceRow("Quality", qualityLabel(audio, quality), Icons.Default.HighQuality, onQuality) }
@@ -317,44 +375,59 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        Surface(color = MaterialTheme.colorScheme.background, shadowElevation = 8.dp) { Box(Modifier.padding(horizontal = PagePadding, vertical = 16.dp).navigationBarsPadding()) {
+        Surface(color = MaterialTheme.colorScheme.background, shadowElevation = 8.dp) { Box(Modifier.padding(horizontal = PagePadding, vertical = 8.dp)) {
             PrimaryButton(if (media.playlist) "Download playlist" else if (audio) "Download audio" else "Download video", Icons.Default.Download, onDownload)
         } }
     }
 }
 
-@Composable private fun DownloadsScreen(jobs: List<DownloadItem>, onDetail: (String) -> Unit, onPause: (String) -> Unit, onResume: (String) -> Unit, onCancel: (String) -> Unit, onHome: () -> Unit) {
+@Composable private fun DownloadsScreen(jobs: List<DownloadItem>, onDetail: (String) -> Unit, onPause: (String) -> Unit, onResume: (String) -> Unit, onCancel: (String) -> Unit, onHome: () -> Unit, onPlay: (String) -> Unit, onAdd: (String) -> Unit) {
+    val music by MusicRepository.state.collectAsStateWithLifecycle()
     var filter by rememberSaveable { mutableStateOf("Active") }
     val filtered = jobs.filter { when (filter) { "Completed" -> it.state == "Completed"; "Failed" -> it.state in listOf("Failed", "Cancelled"); else -> !it.terminal } }
     Column(Modifier.fillMaxSize().padding(horizontal = PagePadding)) {
         Text("Downloads", style = MaterialTheme.typography.headlineLarge)
-        Text("Everything in one place.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp, bottom = 20.dp))
+        Text("${jobs.count { !it.terminal }} active · ${jobs.count { it.state == "Completed" }} completed", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
         FilterTabs(listOf("Active", "Completed", "Failed"), filter) { filter = it }
         if (filtered.isEmpty()) EmptyState(if (filter == "Active") "Your queue is clear" else "No ${filter.lowercase()} downloads", "Paste a YouTube link to save your next favorite.", onHome)
-        else LazyColumn(contentPadding = PaddingValues(top = 20.dp, bottom = 132.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            items(filtered, key = { it.id }) { item -> DownloadCard(item, { onDetail(item.id) }, { onPause(item.id) }, { onResume(item.id) }, { onCancel(item.id) }) }
+        else LazyColumn(contentPadding = PaddingValues(top = 20.dp, bottom = LocalMusicBottomPadding.current + 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            items(filtered, key = { it.id }) { item -> Box(Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)) { DownloadCard(item, { onDetail(item.id) }, { onPause(item.id) }, { onResume(item.id) }, { onCancel(item.id) }, onPlay = { onPlay(item.id) }, onAdd = if (music.tracks.any { it.downloadId == item.id }) null else { { onAdd(item.id) } }) } }
         }
     }
 }
 
-@Composable private fun DownloadCard(item: DownloadItem, onDetail: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit) {
+@Composable private fun DownloadCard(item: DownloadItem, onDetail: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit, onPlay: (() -> Unit)? = null, onAdd: (() -> Unit)? = null) {
+    var menu by remember { mutableStateOf(false) }
+    val statusColor = when (item.state) { "Completed" -> Success; "Processing", "Exporting", "Zipping" -> Color(0xFFFFBD66); "Paused", "Interrupted" -> MaterialTheme.colorScheme.onSurfaceVariant; else -> Crimson }
     Surface(shape = CardShape, color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth().clickable(onClick = onDetail)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Thumbnail(item.media.thumbnail, Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)))
-                Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                    Text(item.media.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text("${if (item.audio) "MP3" else "Video"} · ${qualityLabel(item.audio, item.quality)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+                Thumbnail(item.media.thumbnail, Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)))
+                Column(Modifier.padding(start = 10.dp).weight(1f)) {
+                    Text(item.media.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text("${if (item.audio) "MP3" else "Video"} · ${qualityLabel(item.audio, item.quality)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (item.state == "Completed" && item.audio && item.uris.isNotEmpty() && onPlay != null) IconButton(onClick = onPlay) { Icon(Icons.Default.PlayArrow, "Play completed audio", tint = Crimson) }
+                Box {
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Download options") }
+                    DropdownMenu(menu, { menu = false }) {
+                        DropdownMenuItem(text = { Text("Details") }, onClick = { menu = false; onDetail() })
+                        if (!item.terminal) {
+                            DropdownMenuItem(text = { Text(if (item.state in listOf("Paused", "Interrupted")) "Resume" else "Pause") }, onClick = { menu = false; if (item.state in listOf("Paused", "Interrupted")) onResume() else onPause() })
+                            DropdownMenuItem(text = { Text("Cancel download") }, onClick = { menu = false; onCancel() })
+                        } else if (item.state != "Completed") DropdownMenuItem(text = { Text("Retry") }, onClick = { menu = false; onResume() })
+                        if (item.state == "Completed" && item.audio && item.uris.isNotEmpty() && onAdd != null) DropdownMenuItem(text = { Text("Add to library") }, onClick = { menu = false; onAdd() })
+                    }
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) { Text(item.state, color = if (item.state == "Completed") Success else Crimson, fontSize = 12.sp, modifier = Modifier.weight(1f)); Text("${item.progress.toInt()}%", fontWeight = FontWeight.Bold, fontSize = 12.sp) }
-            LinearProgressIndicator(progress = { item.progress / 100f }, modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape), color = Crimson, trackColor = MaterialTheme.colorScheme.surfaceVariant)
-            Text(if (item.error.isNotEmpty()) "Could not finish · tap for details" else item.line, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-            if (!item.terminal) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                if (item.eta > 0) Text("ETA ${durationLabel(item.eta)}", modifier = Modifier.weight(1f).align(Alignment.CenterVertically), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                IconButton(onClick = if (item.state in listOf("Paused", "Interrupted")) onResume else onPause) { Icon(if (item.state in listOf("Paused", "Interrupted")) Icons.Default.PlayArrow else Icons.Default.Pause, if (item.state in listOf("Paused", "Interrupted")) "Resume download" else "Pause download") }
-                IconButton(onClick = onCancel) { Icon(Icons.Default.Close, "Cancel download", tint = Crimson) }
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                DownloadMotionStatus(item.state, statusColor)
+                Text(if (item.state == "Completed") bytesLabel(item.bytes) else "${item.progress.toInt()}%", style = MaterialTheme.typography.labelMedium)
+                if (item.eta > 0 && !item.terminal) Text("ETA ${durationLabel(item.eta)}", style = MaterialTheme.typography.labelMedium)
+                if (item.media.playlist) Text("${item.completedCount} of ${item.media.count} completed", style = MaterialTheme.typography.labelMedium)
             }
+            if (!item.terminal) DownloadMotionProgress(item, Modifier.fillMaxWidth().height(3.dp))
+            if (item.error.isNotBlank() || item.line.isNotBlank()) Text(if (item.error.isNotEmpty()) "Could not finish · tap for details" else item.line, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -368,7 +441,7 @@ class MainActivity : ComponentActivity() {
         OutlinedTextField(search, { search = it }, placeholder = { Text("Search your history") }, leadingIcon = { Icon(Icons.Default.Search, null) }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(14.dp))
         FilterTabs(listOf("All", "Audio", "Video", "Playlists"), filter) { filter = it }
         if (filtered.isEmpty()) EmptyState("Nothing here yet", "Your finished downloads will appear here.", onHome)
-        else LazyColumn(contentPadding = PaddingValues(bottom = 132.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        else LazyColumn(contentPadding = PaddingValues(bottom = LocalMusicBottomPadding.current + 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             items(filtered, key = { it.id }) { item ->
                 Row(Modifier.fillMaxWidth().clip(CardShape).background(MaterialTheme.colorScheme.surface).clickable { onDetail(item.id) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Thumbnail(item.media.thumbnail, Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)))
@@ -384,12 +457,25 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable private fun DownloadDetail(item: DownloadItem, onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit, onCopy: () -> Unit, onOpen: () -> Unit, onZip: () -> Unit, onFolder: () -> Unit, onRemove: () -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        Thumbnail(item.media.thumbnail, Modifier.fillMaxWidth().aspectRatio(16f / 9).clip(CardShape))
+@Composable private fun DownloadDetail(item: DownloadItem, onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit, onCopy: () -> Unit, onOpen: () -> Unit, onExtract: () -> Unit, onZip: () -> Unit, onFolder: () -> Unit, onRemove: () -> Unit) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding).padding(bottom = LocalMusicBottomPadding.current + 20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Thumbnail(item.media.thumbnail, Modifier.size(64.dp).clip(CardShape))
+            Text(item.media.title, Modifier.weight(1f).padding(start = 12.dp), style = MaterialTheme.typography.titleMedium)
+        }
         if (item.state == "Completed") Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.CheckCircle, null, tint = Success); Text(if (item.media.playlist) "Playlist complete" else "Download complete", color = Success, modifier = Modifier.padding(start = 8.dp), fontWeight = FontWeight.Bold) }
-        Text(item.media.title, style = MaterialTheme.typography.headlineSmall)
-        DownloadCard(item, {}, onPause, onResume, onCancel)
+        if (!item.terminal) {
+            DownloadMotionProgress(item, Modifier.fillMaxWidth())
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("${item.progress.toInt()}%")
+                if (item.eta > 0) Text("ETA ${durationLabel(item.eta)}")
+            }
+        }
+        if (item.line.isNotBlank()) Text(item.line, style = MaterialTheme.typography.bodySmall)
+        if (item.state !in listOf("Paused", "Interrupted") && !item.terminal) FlowRow {
+            TextButton(onClick = onPause) { Text("Pause") }
+            TextButton(onClick = onCancel) { Text("Cancel download") }
+        }
         CardBlock {
             DetailRow("Format", if (item.audio) "MP3 audio" else "Video")
             DetailRow("Quality", qualityLabel(item.audio, item.quality))
@@ -400,22 +486,23 @@ class MainActivity : ComponentActivity() {
             DetailRow("Source URL", item.media.url)
         }
         if (item.error.isNotBlank()) CardBlock { Label("DOWNLOAD ERROR"); Text(item.error, color = Crimson, fontSize = 13.sp) }
-        if (item.uris.isNotEmpty()) PrimaryButton("Open file", Icons.Default.PlayArrow, onOpen)
+        if (item.zipUri.isNotBlank()) OutlinedButton(onClick = onExtract, modifier = Modifier.fillMaxWidth()) { Text("Extract and import playlist") }
+        if (item.state == "Completed" && item.uris.isNotEmpty()) PrimaryButton(if (item.audio) "Play now" else "Open video", Icons.Default.PlayArrow, onOpen)
         if (item.zipUri.isNotBlank()) PrimaryButton("Open ZIP", Icons.Default.FolderZip, onZip)
         if (item.state in listOf("Failed", "Cancelled", "Paused", "Interrupted")) PrimaryButton(if (item.state in listOf("Paused", "Interrupted")) "Resume download" else "Retry download", Icons.Default.Refresh, onResume)
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = onCopy, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Icon(Icons.Default.ContentCopy, null, Modifier.size(18.dp)); Text("Copy URL", Modifier.padding(start = 8.dp)) }
-            OutlinedButton(onClick = onFolder, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Icon(Icons.Default.FolderOpen, null, Modifier.size(18.dp)); Text("Open folder", Modifier.padding(start = 8.dp)) }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onCopy, modifier = Modifier.heightIn(min = 48.dp)) { Icon(Icons.Default.ContentCopy, null, Modifier.size(18.dp)); Text("Copy URL", Modifier.padding(start = 8.dp)) }
+            OutlinedButton(onClick = onFolder, modifier = Modifier.heightIn(min = 48.dp)) { Icon(Icons.Default.FolderOpen, null, Modifier.size(18.dp)); Text("Open folder", Modifier.padding(start = 8.dp)) }
         }
         if (item.terminal || item.state in listOf("Paused", "Interrupted")) TextButton(onClick = onRemove, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.DeleteOutline, null); Text("Remove from history", Modifier.padding(start = 8.dp)) }
     }
 }
 
-@Composable private fun SettingsScreen(prefs: Preferences, engine: String, onFolder: () -> Unit, onStorage: () -> Unit, onCookies: () -> Unit, onLogs: () -> Unit, onUpdate: () -> Unit) {
+@Composable private fun SettingsScreen(prefs: Preferences, engine: String, onFolder: () -> Unit, onStorage: () -> Unit, onCookies: () -> Unit, onLogs: () -> Unit, onPlayer: () -> Unit, onHistory: () -> Unit, onUpdate: () -> Unit) {
     var proxyDialog by remember { mutableStateOf(false) }
     var proxy by remember { mutableStateOf(prefs.proxy) }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding).padding(bottom = 112.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        Text("Make it work for you.", style = MaterialTheme.typography.headlineSmall)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding).padding(bottom = LocalMusicBottomPadding.current + 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text("Settings", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.testTag("settings-title"))
         SettingsGroup("DOWNLOADS") {
             ChoiceRow("Save location", prefs.folderName, Icons.Default.FolderOpen, onFolder)
             SelectSetting("Concurrent downloads", prefs.concurrency.toString(), listOf("1", "2", "3")) { DownloadStore.savePrefs(prefs.copy(concurrency = it.toInt())) }
@@ -443,6 +530,8 @@ class MainActivity : ComponentActivity() {
             ChoiceRow("Cookies file", if (prefs.cookiesPath.isBlank()) "Optional · Netscape format" else "Imported into private storage", Icons.Default.Cookie, onCookies)
             if (prefs.cookiesPath.isNotBlank()) TextButton(onClick = { DownloadStore.savePrefs(prefs.copy(cookiesPath = "")) }) { Text("Remove cookies") }
             ChoiceRow("Proxy", prefs.proxy.ifBlank { "No proxy" }, Icons.Default.Language) { proxyDialog = true }
+            ChoiceRow("Music player", "Playback, library and audio effects", Icons.Default.MusicNote, onPlayer)
+            ChoiceRow("Download history", "Completed and previous downloads", Icons.Default.History, onHistory)
             ChoiceRow("Download logs", "Review errors and engine output", Icons.Default.Notes, onLogs)
         }
         Text("YTHub for Android · 1.0.2\nDownload. Convert. Manage.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))
@@ -454,26 +543,30 @@ class MainActivity : ComponentActivity() {
 
 @Composable private fun StorageScreen(jobs: List<DownloadItem>, prefs: Preferences, onFolder: () -> Unit, onClear: () -> Unit) {
     val context = LocalContext.current
-    var temporary by remember { mutableLongStateOf(0) }
-    LaunchedEffect(jobs) { temporary = withContext(Dispatchers.IO) { DownloadStore.temporaryBytes() } }
+    val music by MusicRepository.state.collectAsStateWithLifecycle()
+    var storage by remember { mutableStateOf(MusicStorageUsage()) }
+    LaunchedEffect(jobs, music) { storage = withContext(Dispatchers.IO) { MusicFileAccess.storage(context) } }
     val stats = StatFs(context.filesDir.absolutePath)
     val total = stats.totalBytes
     val free = stats.availableBytes
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PagePadding).padding(bottom = LocalMusicBottomPadding.current + 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Room for your favorites.", style = MaterialTheme.typography.headlineSmall)
         CardBlock {
             Label("DEVICE STORAGE")
-            Text(bytesLabel(free), fontSize = 32.sp, fontWeight = FontWeight.Bold)
+            Text(bytesLabel(free), fontSize = 24.sp, fontWeight = FontWeight.Bold)
             Text("free of ${bytesLabel(total)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
             LinearProgressIndicator(progress = { (1f - free.toFloat() / total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(10.dp).clip(CircleShape), color = Crimson, trackColor = MaterialTheme.colorScheme.surfaceVariant)
         }
         CardBlock {
-            Label("YTHUB DOWNLOAD HISTORY")
-            DetailRow("Audio", bytesLabel(jobs.filter { it.audio && it.state == "Completed" }.sumOf { it.bytes }))
-            DetailRow("Video", bytesLabel(jobs.filter { !it.audio && it.state == "Completed" }.sumOf { it.bytes }))
-            DetailRow("ZIP archives", "${jobs.count { it.zipUri.isNotBlank() }} saved")
-            DetailRow("Temporary files", bytesLabel(temporary))
-            Text("Media totals come from download history. Files removed outside YTHub may still be counted.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Label("TRACKED APP STORAGE")
+            DetailRow("Audio", bytesLabel(storage.audio))
+            DetailRow("Video", bytesLabel(storage.video))
+            DetailRow("ZIP archives", bytesLabel(storage.archives))
+            DetailRow("Imported audio", bytesLabel(storage.imported))
+            DetailRow("Artwork cache", bytesLabel(storage.artwork))
+            DetailRow("Temporary files", bytesLabel(storage.temporary))
+            DetailRow("Total tracked app storage", bytesLabel(storage.total))
+            Text("Counts accessible download outputs and app-owned imports. External imported files and outputs removed from history are excluded.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         CardBlock {
             Label("DOWNLOAD LOCATION")
@@ -481,13 +574,14 @@ class MainActivity : ComponentActivity() {
             PrimaryButton("Choose folder", Icons.Default.FolderOpen, onFolder)
             if (prefs.folderUri.isNotBlank()) TextButton(onClick = { DownloadStore.savePrefs(prefs.copy(folderUri = "", folderName = "Downloads / YTHub")) }) { Text("Use default Downloads folder") }
         }
+        OutlinedButton(onClick = MusicRepository::clearArtwork, modifier = Modifier.fillMaxWidth()) { Text("Clear artwork cache") }
         OutlinedButton(onClick = onClear, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Icon(Icons.Default.CleaningServices, null); Text("Clear temporary files", Modifier.padding(start = 10.dp)) }
         Text("Paused and interrupted downloads keep their partial files so they can resume.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable private fun LogScreen(jobs: List<DownloadItem>) {
-    LazyColumn(contentPadding = PaddingValues(PagePadding), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+    LazyColumn(contentPadding = PaddingValues(start = PagePadding, end = PagePadding, top = PagePadding, bottom = LocalMusicBottomPadding.current + 20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         if (jobs.isEmpty()) item { Text("No download logs yet.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         items(jobs, key = { it.id }) { item -> CardBlock {
             Text(item.media.title, fontWeight = FontWeight.Bold)
@@ -499,32 +593,32 @@ class MainActivity : ComponentActivity() {
 
 @Composable private fun CardBlock(content: @Composable ColumnScope.() -> Unit) {
     Surface(shape = CardShape, color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
     }
 }
 @Composable private fun Label(text: String) { Text(text, fontSize = 11.sp, letterSpacing = 1.3.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 @Composable private fun PrimaryButton(text: String, icon: ImageVector, onClick: () -> Unit, enabled: Boolean = true) {
-    Button(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Crimson)) {
+    Button(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Crimson)) {
         Icon(icon, null, Modifier.size(20.dp)); Text(text, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 10.dp))
     }
 }
 @Composable private fun BadgeText(text: String) { Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(8.dp)) { Text(text, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) } }
 @Composable private fun FormatSelector(audio: Boolean, onAudio: (Boolean) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(true to "Audio · MP3", false to "Video · MP4").forEach { (isAudio, label) ->
             val selected = isAudio == audio
             Surface(onClick = { onAudio(isAudio) }, color = if (selected) Crimson.copy(alpha = .13f) else MaterialTheme.colorScheme.surface,
-                shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, if (selected) Crimson else MaterialTheme.colorScheme.outline), modifier = Modifier.weight(1f).heightIn(min = 64.dp)) {
-                Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, if (selected) Crimson else MaterialTheme.colorScheme.outline), modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
+                Row(Modifier.padding(horizontal = 8.dp, vertical = 10.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                     Icon(if (isAudio) Icons.Default.MusicNote else Icons.Default.Videocam, null, Modifier.size(22.dp), tint = if (selected) Crimson else MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 8.dp))
+                    Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f).padding(start = 6.dp), maxLines = 2)
                 }
             }
         }
     }
 }
 @Composable private fun ChoiceRow(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, Modifier.size(22.dp), tint = Crimson)
         Column(Modifier.padding(start = 12.dp).weight(1f)) { Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp); Text(subtitle, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)) }
         Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -537,9 +631,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 @Composable private fun FilterTabs(options: List<String>, selected: String, onSelect: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { options.forEach { option ->
-        Surface(onClick = { onSelect(option) }, modifier = Modifier.weight(1f).heightIn(min = 44.dp), shape = RoundedCornerShape(12.dp), color = if (selected == option) Crimson else MaterialTheme.colorScheme.surface) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 4.dp)) { Text(option, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (selected == option) Color.White else MaterialTheme.colorScheme.onSurfaceVariant) }
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { options.forEach { option ->
+        Surface(onClick = { onSelect(option) }, modifier = Modifier.heightIn(min = 44.dp).widthIn(min = 48.dp), shape = RoundedCornerShape(12.dp), color = if (selected == option) Crimson else MaterialTheme.colorScheme.surface) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) { Text(option, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (selected == option) Color.White else MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     } }
 }
@@ -550,9 +644,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 @Composable private fun EmptyState(title: String, text: String, onHome: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(vertical = 48.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Image(painterResource(R.drawable.ythub_logo), "YTHub", Modifier.size(76.dp))
-        Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 24.dp))
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = LocalMusicBottomPadding.current).padding(vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Image(painterResource(R.drawable.ythub_logo), "YTHub", Modifier.size(44.dp))
+        Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 12.dp))
         Text(text, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 12.dp, bottom = 24.dp))
         PrimaryButton("Find something to save", Icons.Default.Link, onHome)
     }
@@ -561,7 +655,7 @@ class MainActivity : ComponentActivity() {
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Text(title, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(value, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp)) }
 }
 @Composable private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Label(title); CardBlock(content) }
+    MusicSettingsSection(title, "", initiallyExpanded = title == "DOWNLOADS", content = content)
 }
 @Composable private fun SelectSetting(title: String, value: String, options: List<String>, display: (String) -> String = { it }, onSelect: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }

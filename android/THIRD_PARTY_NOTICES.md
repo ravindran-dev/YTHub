@@ -11,3 +11,7 @@ YTHub Android source is licensed under GNU GPL v3. A copy is included in `LICENS
 - YTHub branding and icon derive from the user's supplied reference and the existing YTHub repository assets.
 
 Complete corresponding Android application source, Gradle files, pinned dependency coordinates and wrapper are in `android/`. Native dependency source/build information is available at the upstream repository above. Public redistribution requires preserving applicable notices and providing corresponding source as required by each license.
+
+## Inter font
+
+Inter is copyright The Inter Project Authors, licensed under the SIL Open Font License 1.1. The font is bundled for consistent sans-serif typography across device themes. License: `licenses/Inter-OFL.txt`. Source: https://github.com/google/fonts/tree/main/ofl/inter

@@ -27,7 +27,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 class YTHubApplication : Application() {
-    override fun onCreate() { super.onCreate(); DownloadStore.init(this) }
+    override fun onCreate() { super.onCreate(); DownloadStore.init(this); MusicRepository.init(this); MusicPlayback.init(this) }
 }
 
 object DownloadStore {
@@ -227,7 +227,7 @@ object DownloadStore {
                 change(item.id) { if (it.state in listOf("Paused", "Cancelled")) it else it.copy(completedCount = completed, failedCount = failures) }
             }
             checkRunning(item.id)
-            val files = directory.listFiles()?.filter { it.extension.lowercase() in listOf("mp3", "mp4", "mkv", "webm", "m4a") && it.length() > 0 } ?: emptyList()
+            val files = directory.listFiles()?.filter { it.extension.lowercase() in listOf("mp3", "mp4", "mkv", "webm", "m4a") && it.length() > 0 }?.sortedBy { it.name } ?: emptyList()
             check(files.isNotEmpty()) { "No media was downloaded. Retry or update the engine in Settings." }
             var zipUri = ""
             if (item.media.playlist && item.options.autoZip) {
@@ -263,7 +263,14 @@ object DownloadStore {
                 uris = uris.toList(), zipUri = zipUri.ifBlank { it.zipUri }, mime = if (item.audio) "audio/mpeg" else "video/mp4",
                 line = "$completed downloaded${if (failures > 0) " · $failures failed" else " · saved to ${item.options.folderName}"}",
                 error = if (failures > 0) "$failures playlist items failed. Retry to attempt the playlist again; existing local files will be reused." else "") }
-            if (failures == 0) { directory.deleteRecursively(); DownloadService.notifyFinished(context, current(item.id)) }
+            if (failures == 0) { directory.deleteRecursively(); DownloadService.notifyFinished(context, current(item.id));
+                if (item.audio && (MusicRepository.state.value.settings.autoAdd || MusicRepository.state.value.settings.autoPlayDownload)) {
+                    MusicRepository.rescan(MusicRepository.state.value.settings.autoPlayDownload)
+                    if (MusicRepository.state.value.settings.autoPlayDownload) withContext(Dispatchers.Main) {
+                        val ids = MusicRepository.state.value.tracks.filter { it.downloadId == item.id }.map { it.id }
+                        if (ids.isNotEmpty()) MusicPlayback.play(ids)
+                    }
+                } }
         } catch (e: Exception) {
             change(item.id) { if (it.state in listOf("Paused", "Cancelled")) it else it.copy(state = "Failed", error = e.message?.takeLast(1600) ?: "Download failed", line = "Tap retry to continue") }
         }
