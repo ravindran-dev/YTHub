@@ -87,7 +87,7 @@ import kotlinx.coroutines.withContext
             }
         }
     }
-    if (confirmation.isNotBlank()) AlertDialog(onDismissRequest = { confirmation = "" }, title = { Text("$confirmation?") }, text = { Text("Your songs and playlists will be kept.") },
+    if (confirmation.isNotBlank()) GlassConfirmDialog(onDismissRequest = { confirmation = "" }, title = { Text("$confirmation?") }, text = { Text("Your songs and playlists will be kept.") },
         dismissButton = { TextButton(onClick = { confirmation = "" }) { Text("Cancel") } }, confirmButton = { TextButton(onClick = {
             when (confirmation) {
                 "Clear artwork cache" -> MusicRepository.clearArtwork()

@@ -27,7 +27,8 @@ internal object MusicPersistence {
             speed = state.settings.speed.takeIf { it in listOf(.5f, .75f, 1f, 1.25f, 1.5f, 1.75f, 2f) } ?: 1f,
             bass = state.settings.bass.coerceIn(0, 1000),
             skipForward = state.settings.skipForward.coerceIn(5, 60), skipBackward = state.settings.skipBackward.coerceIn(5, 60),
-            libraryLayout = state.settings.libraryLayout.takeIf { it in listOf("Grid", "Compact") } ?: "Grid")
+            libraryLayout = state.settings.libraryLayout.takeIf { it in listOf("Grid", "Compact") } ?: "Grid",
+            songsLayout = state.settings.songsLayout.takeIf { it in listOf("Grid", "Compact") } ?: "Compact")
         return state.copy(version = 2, tracks = state.tracks.distinctBy { it.id }, queueIndex = state.queueIndex.coerceIn(0, (state.queue.size - 1).coerceAtLeast(0)),
             position = state.position.coerceAtLeast(0), repeat = state.repeat.coerceIn(0, 2), settings = settings)
     }

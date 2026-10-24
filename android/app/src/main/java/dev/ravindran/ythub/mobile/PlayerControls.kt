@@ -48,23 +48,14 @@ import kotlinx.coroutines.isActive
 import kotlin.math.roundToInt
 
 /** Animates the visual glyph; the accessible hit target never shrinks. */
-@Composable internal fun PlayerControl(icon: ImageVector, description: String, onClick: () -> Unit, active: Boolean = false, enabled: Boolean = true, size: Dp = 48.dp, glyph: Dp = 24.dp) {
+@Composable internal fun PlayerControl(icon: ImageVector, description: String, onClick: () -> Unit, active: Boolean = false, enabled: Boolean = true, size: Dp = 48.dp, glyph: Dp = 24.dp, modifier: Modifier = Modifier) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val pulse = remember { Animatable(1f) }
-    var previousIcon by remember { mutableStateOf(icon) }
-    LaunchedEffect(icon) {
-        if (previousIcon != icon) {
-            previousIcon = icon
-            pulse.animateTo(1.12f, tween(80))
-            pulse.animateTo(1f, spring(dampingRatio = .7f, stiffness = 500f))
-        }
-    }
-    val scale by animateFloatAsState(if (pressed) .88f else 1f, spring(dampingRatio = .8f, stiffness = 450f), label = "Player control press")
-    val color by animateColorAsState(if (!enabled) Color.White.copy(alpha = .3f) else if (active) MobileUi.accent else Color.White, tween(140), label = "Player control state")
-    IconButton(onClick = onClick, enabled = enabled, interactionSource = interaction, modifier = Modifier.size(size)) {
+    val scale by animateFloatAsState(if (pressed) .96f else 1f, spring(dampingRatio = 1f, stiffness = 500f), label = "Player control press")
+    val color by animateColorAsState(if (!enabled) MaterialTheme.colorScheme.onSurface.copy(alpha = .3f) else if (active) MobileUi.accent else MaterialTheme.colorScheme.onSurface, tween(140), label = "Player control state")
+    IconButton(onClick = onClick, enabled = enabled, interactionSource = interaction, modifier = modifier.size(size)) {
         Crossfade(icon, animationSpec = tween(140), label = "Player glyph") { vector ->
-            Icon(vector, description, Modifier.size(glyph).graphicsLayer { scaleX = scale * pulse.value; scaleY = scale * pulse.value }, tint = color)
+            Icon(vector, description, Modifier.size(glyph).graphicsLayer { scaleX = scale; scaleY = scale }, tint = color)
         }
     }
 }
@@ -91,23 +82,23 @@ import kotlin.math.roundToInt
         }
     }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(Icons.Rounded.VolumeDown, null, Modifier.size(18.dp), tint = Color.White.copy(alpha = .6f))
+        Icon(Icons.Rounded.VolumeDown, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
         GlassPlayerSlider(value = volume.toFloat(), onValueChange = { requested ->
             val next = requested.roundToInt().coerceIn(minimum, maximum.coerceAtLeast(minimum))
             if (next != volume) runCatching { audio.setStreamVolume(AudioManager.STREAM_MUSIC, next, 0); volume = next }
                 .onFailure { MusicPlayback.error.value = "Android could not change media volume: ${it.message}" }
         }, valueRange = minimum.toFloat()..maximum.coerceAtLeast(minimum + 1).toFloat(), enabled = !fixed && maximum > minimum,
             description = "Media volume", modifier = Modifier.weight(1f))
-        Icon(Icons.Rounded.VolumeUp, null, Modifier.size(20.dp), tint = Color.White.copy(alpha = .6f))
+        Icon(Icons.Rounded.VolumeUp, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
     }
-    if (fixed) Text("Volume is controlled by the connected device", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = .65f))
+    if (fixed) Text("Volume is controlled by the connected device", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
     TextButton(onClick = {
         runCatching { context.startActivity(Intent(if (Build.VERSION.SDK_INT >= 29) Settings.Panel.ACTION_VOLUME else Settings.ACTION_SOUND_SETTINGS)) }
             .recoverCatching { context.startActivity(Intent(Settings.ACTION_SOUND_SETTINGS)) }
             .onFailure { MusicPlayback.error.value = "Android audio settings are unavailable: ${it.message}" }
     }) {
-        Icon(Icons.Rounded.DevicesOther, null, Modifier.size(16.dp), tint = Color.White.copy(alpha = .75f))
-        Text("Audio output", Modifier.padding(start = 6.dp), style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = .8f))
+        Icon(Icons.Rounded.DevicesOther, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = .75f))
+        Text("Audio output", Modifier.padding(start = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .8f))
     }
 }
 
@@ -133,6 +124,7 @@ import kotlin.math.roundToInt
     val fraction = ((value - valueRange.start) / range).coerceIn(0f, 1f)
     val progress by animateFloatAsState(fraction, if (engaged) snap() else tween(220, easing = LinearOutSlowInEasing), label = "Slider progress")
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val sliderInk = MaterialTheme.colorScheme.onSurface
     Slider(value = value.coerceIn(valueRange), onValueChange = onValueChange, valueRange = valueRange,
         onValueChangeFinished = onValueChangeFinished, enabled = enabled, interactionSource = interaction,
         modifier = modifier.heightIn(min = 48.dp).semantics { contentDescription = description },
@@ -142,9 +134,9 @@ import kotlin.math.roundToInt
                 val height = thickness.dp.toPx()
                 val top = (size.height - height) / 2f
                 val radius = CornerRadius(height / 2f)
-                drawRoundRect(Color.White.copy(alpha = if (enabled) .12f else .06f), Offset(0f, top), Size(size.width, height), radius)
+                drawRoundRect(sliderInk.copy(alpha = if (enabled) .12f else .06f), Offset(0f, top), Size(size.width, height), radius)
                 val width = size.width * progress
-                if (width > 0f) drawRoundRect(Color.White.copy(alpha = opacity), Offset(if (rtl) size.width - width else 0f, top), Size(width, height), radius)
+                if (width > 0f) drawRoundRect(sliderInk.copy(alpha = opacity), Offset(if (rtl) size.width - width else 0f, top), Size(width, height), radius)
             }
         })
 }

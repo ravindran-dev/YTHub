@@ -17,7 +17,7 @@ data class PlayerPreferences(
     val autoAdd: Boolean = true, val autoPlayDownload: Boolean = false, val downloadPlaylists: Boolean = true,
     val notifyPlaylist: Boolean = true, val rememberPosition: Boolean = true, val restoreTrack: Boolean = true,
     val autoNext: Boolean = true, val background: Boolean = true, val speed: Float = 1f,
-    val skipForward: Int = 10, val skipBackward: Int = 10, val libraryLayout: String = "Grid",
+    val skipForward: Int = 10, val skipBackward: Int = 10, val libraryLayout: String = "Grid", val songsLayout: String = "Compact",
     val equalizer: Boolean = false, val preset: String = "Flat", val bands: List<Int> = emptyList(), val bass: Int = 0
 )
 data class MusicState(

@@ -7,10 +7,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.foundation.BorderStroke
@@ -21,7 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -30,6 +26,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -72,7 +69,7 @@ internal fun musicTypography(): Typography {
         Column(Modifier.padding(8.dp)) {
             Box {
                 TrackArtwork(track, Modifier.fillMaxWidth().aspectRatio(1f))
-                if (onMore != null) IconButton(onClick = onMore, modifier = Modifier.align(Alignment.TopEnd)) { Icon(Icons.Default.MoreVert, "Options for ${track.title}", tint = Color.White) }
+                if (onMore != null) IconButton(onClick = onMore, modifier = Modifier.align(Alignment.TopEnd)) { Icon(Icons.Default.MoreHoriz, "Options for ${track.title}", tint = Color.White) }
             }
             Row(Modifier.fillMaxWidth().padding(start = 4.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(track.title, Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
@@ -128,16 +125,53 @@ internal fun musicTypography(): Typography {
     forward: Boolean = false
 ) {
     val tint = if (destructive) MobileUi.accent else MaterialTheme.colorScheme.onSurface
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) .9f else 1f, spring(dampingRatio = .8f, stiffness = 500f), label = "Sheet action press")
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(enabled = enabled, interactionSource = interaction, indication = LocalIndication.current, role = Role.Button, onClick = onClick)
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(14.dp)).glassTouch(onClick, enabled)
         .padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Icon(icon, null, Modifier.size(20.dp).graphicsLayer { scaleX = scale; scaleY = scale }, tint = tint.copy(alpha = if (enabled) .85f else .3f))
+        Icon(icon, null, Modifier.size(20.dp), tint = tint.copy(alpha = if (enabled) .85f else .3f))
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyMedium, color = tint.copy(alpha = if (enabled) 1f else .4f), maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (!subtitle.isNullOrBlank()) Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         if (forward) Icon(Icons.Default.ChevronRight, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** Compact real-content rows keep Home's primary download controls near the top. */
+@Composable internal fun MusicRecentList(title: String, tracks: List<LocalTrack>, empty: String, onAll: () -> Unit, onTrack: (LocalTrack) -> Unit) {
+    MusicSectionTitle(title, onAction = onAll)
+    if (tracks.isEmpty()) {
+        Text(empty, Modifier.fillMaxWidth().padding(vertical = 10.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    } else Column {
+        tracks.take(3).forEach { track ->
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).glassTouch({ onTrack(track) }, track.available).padding(vertical = 8.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TrackArtwork(track, Modifier.size(46.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+                    Text("${track.artist} · ${track.format}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(durationLabel(track.durationMs / 1000), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (track != tracks.take(3).last()) HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = .07f), modifier = Modifier.padding(start = 62.dp))
+        }
+    }
+}
+
+@Composable
+internal fun MusicPillButton(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit,
+    enabled: Boolean = true, primary: Boolean = true, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(50)
+    val foreground = if (primary) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+    val fill = if (primary) MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else .30f)
+        else MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) .09f else .035f)
+    Box(modifier.heightIn(min = 48.dp).clip(shape).glassTouch(onClick, enabled), contentAlignment = Alignment.Center) {
+        Surface(Modifier.height(36.dp), shape = shape, color = fill,
+            border = if (primary) null else BorderStroke(.65.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .20f))) {
+            Row(Modifier.padding(horizontal = 15.dp).height(36.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(icon, null, Modifier.size(17.dp), tint = foreground.copy(alpha = if (enabled) 1f else .5f))
+                Text(label, style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp), color = foreground.copy(alpha = if (enabled) 1f else .5f), maxLines = 1)
+            }
+        }
     }
 }

@@ -1,0 +1,7 @@
+<resources>
+    <style name="AppTheme" parent="AppTheme.Base">
+        <item name="android:windowSplashScreenBackground">#090A0D</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ythub_logo</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#090A0D</item>
+    </style>
+</resources>

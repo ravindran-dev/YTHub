@@ -80,7 +80,7 @@ internal object DeviceMusicCatalog {
     var songs by remember { mutableStateOf(emptyList<LocalTrack>()) }
     var selected by remember { mutableStateOf(emptySet<String>()) }
     var search by remember { mutableStateOf("") }
-    var query by remember { mutableStateOf("") }
+    val query = search.trim()
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> access = granted; revision++ }
     LaunchedEffect(Unit) { if (!access) permission.launch(DeviceMusicCatalog.permission) }
     DisposableEffect(lifecycle, context) {
@@ -101,13 +101,12 @@ internal object DeviceMusicCatalog {
         catch (e: Exception) { error = "Could not read phone music. Check music access and try again." }
         finally { loading = false }
     }
-    LaunchedEffect(search) { delay(200); query = search.trim() }
     val visible by produceState(songs, songs, query) { value = withContext(Dispatchers.Default) { songs.filter { query.isBlank() || it.title.contains(query, true) || it.artist.contains(query, true) || it.filename.contains(query, true) } } }
     val already = remember(library.tracks, library.playlists, playlistId) {
         val ids = library.playlists.firstOrNull { it.id == playlistId }?.tracks?.toSet().orEmpty()
         library.tracks.filter { it.id in ids }.map { it.uri }.toSet()
     }
-    ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }) {
+    GlassSheet(onDismissRequest = { if (!busy) onDismiss() }) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(.9f).padding(horizontal = 20.dp).navigationBarsPadding().imePadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Music on this phone", style = MaterialTheme.typography.headlineSmall)
             if (!keyboardOpen) Text("Choose music already saved on your phone. New downloads appear here automatically.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

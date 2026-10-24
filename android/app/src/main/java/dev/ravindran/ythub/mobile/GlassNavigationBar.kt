@@ -1,21 +1,28 @@
 package dev.ravindran.ythub.mobile
 
 import android.os.Build
-import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,40 +30,57 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.BlurEffect
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.TileMode
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.layout.positionOnScreen
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.sin
+
+// One interaction source per glass surface lets a capsule flex as one continuous object.
+internal data class GlassScene(val layer: GraphicsLayer, val origin: Offset)
+internal val LocalGlassScene = staticCompositionLocalOf<GlassScene?> { null }
+private val LocalGlassInteraction = staticCompositionLocalOf<MutableInteractionSource?> { null }
+
+/** Bounded feedback without the rectangular Material ripple. Haptics respect system settings. */
+@Composable
+internal fun Modifier.glassTouch(onClick: () -> Unit, enabled: Boolean = true): Modifier {
+    val shared = LocalGlassInteraction.current
+    val interaction = shared ?: remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val haptics = LocalHapticFeedback.current
+    LaunchedEffect(pressed) { if (shared == null && pressed && enabled) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
+    val feedback by animateFloatAsState(if (shared == null && pressed) 1f else 0f, spring(dampingRatio = .8f, stiffness = 450f), label = "Row press")
+    return graphicsLayer { scaleX = 1f - .015f * feedback; scaleY = 1f - .025f * feedback }
+        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = .045f * feedback.coerceIn(0f, 1f)))
+        .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+}
 
 /** Draws the screen behind the glass; labels and touch targets remain sharp. */
 @Composable
 internal fun GlassBackdrop(layer: GraphicsLayer, origin: Offset, position: Offset, blur: Float, magnification: Float = 1f) {
+    val backing = MaterialTheme.colorScheme.background
+    val atmosphere = LocalAtmosphereLayer.current
     Box(Modifier.fillMaxSize().graphicsLayer {
         if (Build.VERSION.SDK_INT >= 31) renderEffect = BlurEffect(blur, blur, TileMode.Clamp)
     }.drawBehind {
+        // Fill transparent pixels in the recorded content so sharp underlying text cannot bleed through the frost.
+        drawRect(backing)
+        if (atmosphere != null && atmosphere.size.width > 0) {
+            with(drawContext.canvas) { save(); translate(-position.x, -position.y); drawLayer(atmosphere); restore() }
+        }
         if (layer.size.width > 0 && layer.size.height > 0) {
             // Zoom around the glass centre, rather than around the source screen origin.
             val centre = Offset(size.width / 2, size.height / 2)
@@ -73,127 +97,134 @@ internal fun GlassBackdrop(layer: GraphicsLayer, origin: Offset, position: Offse
     })
 }
 
+/** A single frosted surface: the captured content is blurred, never the controls. */
 @Composable
-internal fun GlassNavigationBar(selected: String, onSelect: (String) -> Unit, dark: Boolean, backdrop: GraphicsLayer, contentOrigin: Offset) {
-    val entries = listOf("Home", "Downloads", "Library", "Settings")
-    val selectedIndex = entries.indexOf(selected).coerceAtLeast(0)
-    val position by animateFloatAsState(selectedIndex.toFloat(), spring(dampingRatio = .9f, stiffness = 250f), label = "Moving glass selection")
-    val travel = abs(position - selectedIndex).coerceIn(0f, 1f)
-    val stretch by animateFloatAsState(1f + .14f * travel, spring(dampingRatio = .9f, stiffness = 400f), label = "Glass stretch and settle")
-    val shape = RoundedCornerShape(40.dp)
-    val density = LocalDensity.current
-    val barHeight = maxOf(64.dp, 36.dp + with(density) { 14.sp.toDp() } * 2)
-    var glassOrigin by remember { mutableStateOf(Offset.Zero) }
-    val rim = if (dark) Color.White.copy(alpha = .18f) else Color.White.copy(alpha = .9f)
-    val tint = if (dark) Color(0xFF11151D).copy(alpha = .48f) else Color(0xFFF8F8FC).copy(alpha = .68f)
+internal fun GlassControlSurface(modifier: Modifier = Modifier, dark: Boolean = MaterialTheme.colorScheme.background.luminance() < .5f, backdrop: GraphicsLayer? = null, contentOrigin: Offset = Offset.Zero, shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(50), screenPosition: Boolean = false, flexible: Boolean = true, tintAlpha: Float? = null, onPressedChange: (Boolean) -> Unit = {}, content: @Composable BoxScope.() -> Unit) {
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
+    val haptics = LocalHapticFeedback.current
+    LaunchedEffect(pressed) { onPressedChange(pressed); if (pressed) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
+    val compression by animateFloatAsState(if (pressed) 1f else 0f, spring(dampingRatio = .72f, stiffness = 450f), label = "Glass compression")
+    val highlight by animateFloatAsState(if (pressed) .10f else if (hovered) .04f else 0f, spring(stiffness = 600f), label = "Glass highlight")
+    val rim = if (dark) Color.White else Color(0xFF424958)
+    Box(modifier.graphicsLayer { scaleX = 1f - .025f * compression; scaleY = 1f - .055f * compression }.shadow(4.dp, shape, ambientColor = Color.Black.copy(alpha = .12f), spotColor = Color.Black.copy(alpha = .15f)).clip(shape).onGloballyPositioned { origin = if (screenPosition) it.positionOnScreen() else it.positionInRoot() }
+        .border(.65.dp, Brush.verticalGradient(listOf(rim.copy(alpha = if (dark) .25f else .22f), rim.copy(alpha = if (dark) .04f else .09f), rim.copy(alpha = if (dark) .10f else .16f))), shape)) {
+        Box(Modifier.matchParentSize()) {
+            if (backdrop != null) GlassBackdrop(backdrop, contentOrigin, origin, 28f)
+            Box(Modifier.fillMaxSize().background(if (dark) Color(0xFF28282D).copy(alpha = tintAlpha ?: .46f) else Color(0xFFDBE0E8).copy(alpha = tintAlpha ?: .86f)))
+        }
+        Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(Color.White.copy(alpha = if (dark) .06f else .22f), Color.Transparent))))
+        Box(Modifier.matchParentSize().background(MaterialTheme.colorScheme.onSurface.copy(alpha = highlight)))
+        CompositionLocalProvider(LocalGlassInteraction provides if (flexible) interaction else null) { content() }
+    }
+}
 
-    Box(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)).navigationBarsPadding().imePadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        BoxWithConstraints(Modifier.fillMaxWidth().height(barHeight)
-            .shadow(12.dp, shape, ambientColor = Color.Black.copy(alpha = .15f), spotColor = Color.Black.copy(alpha = .22f))
-            .clip(shape).onGloballyPositioned { glassOrigin = it.positionInRoot() }
-            .border(1.dp, Brush.verticalGradient(listOf(rim, rim.copy(alpha = .06f), rim.copy(alpha = .18f))), shape)
-            .testTag("floating-glass-navigation")) {
-            GlassBackdrop(backdrop, contentOrigin, glassOrigin, 22f)
-            Box(Modifier.fillMaxSize().background(tint).background(Brush.verticalGradient(listOf(Color.White.copy(alpha = if (dark) .09f else .4f), Color.Transparent, Color.Black.copy(alpha = .05f)))))
-            val available = maxWidth - 8.dp
-            val textMeasurer = rememberTextMeasurer()
-            val baseLabelStyle = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.sp)
-            val sizing = remember(available, density, baseLabelStyle, textMeasurer) {
-                var font = 11f
-                fun widths() = entries.map { label -> maxOf(48.dp, with(density) { textMeasurer.measure(label, baseLabelStyle.copy(fontSize = font.sp), maxLines = 1).size.width.toDp() } + 4.dp) }
-                var required = widths()
-                while (required.map { it.value }.sum() > available.value && font > 10.01f) { font -= .1f; required = widths() }
-                val equal = available / entries.size
-                val total = required.map { it.value }.sum().dp
-                val slots = if (required.all { it <= equal } || total > available) List(entries.size) { equal }
-                    else required.map { it + (available - total) / entries.size }
-                font to slots
-            }
-            val labelStyle = baseLabelStyle.copy(fontSize = sizing.first.sp)
-            val slots = sizing.second
-            val currentPosition = position.coerceIn(0f, entries.lastIndex.toFloat())
-            val leftIndex = currentPosition.toInt()
-            val fraction = currentPosition - leftIndex
-            val nextIndex = (leftIndex + 1).coerceAtMost(entries.lastIndex)
-            val selectionLeft = slots.take(leftIndex).fold(0.dp) { total, width -> total + width } + slots[leftIndex] * fraction
-            val selectionWidth = slots[leftIndex] + (slots[nextIndex] - slots[leftIndex]) * fraction
-            val lensShape = RoundedCornerShape(28.dp)
-            val lensWidth = selectionWidth * stretch
-            Box(Modifier.offset(x = 4.dp + selectionLeft - (lensWidth - selectionWidth) / 2, y = 6.dp).width(lensWidth).height(barHeight - 12.dp)
-                .clip(lensShape)
-                .border(.75.dp, Brush.verticalGradient(listOf(Color.White.copy(alpha = if (dark) .32f else .85f), Color.White.copy(alpha = .03f), Color.White.copy(alpha = .12f))), lensShape)) {
-                // The base already supplies real blur; a second render-effect pass here duplicates GPU work.
-                Box(Modifier.fillMaxSize().background(if (dark) Color.White.copy(alpha = .075f) else Color(0xFFE2E3EB).copy(alpha = .45f))
-                    .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = if (dark) .09f else .3f), Color.Transparent))))
-            }
-            Row(Modifier.fillMaxSize().padding(horizontal = 4.dp).selectableGroup(), verticalAlignment = Alignment.CenterVertically) {
-                entries.forEachIndexed { index, label ->
-                    val active = label == selected
-                    val interaction = remember { MutableInteractionSource() }
-                    val pressed by interaction.collectIsPressedAsState()
-                    val scale by animateFloatAsState(if (pressed) .92f else if (active) 1.1f else 1f, spring(dampingRatio = .82f, stiffness = 380f), label = "$label press and release")
-                    val lift by animateFloatAsState(if (active && !pressed) -1f else 0f, spring(dampingRatio = .9f, stiffness = 250f), label = "$label lift")
-                    val color by animateColorAsState(if (active) Color(0xFFFF173D) else MaterialTheme.colorScheme.onSurface.copy(alpha = .65f), tween(220), label = "$label glass tint")
-                    Box(Modifier.width(slots[index]).fillMaxHeight().clip(lensShape)
-                        .selectable(selected = active, interactionSource = interaction, indication = null, onClick = { onSelect(label) }, role = Role.Tab)
-                        .testTag("nav-$label"), contentAlignment = Alignment.Center) {
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp).graphicsLayer { translationY = lift.dp.toPx() }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                            NavigationGlyph(label, color, Modifier.size(22.dp).graphicsLayer { scaleX = scale; scaleY = scale })
-                            Spacer(Modifier.height(2.dp))
-                            Text(label, style = labelStyle, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis, color = color, maxLines = 2)
-                        }
+@Composable
+internal fun FloatingPlaybackDock(onHome: () -> Unit, onPlayer: () -> Unit, onLibrary: () -> Unit, onSearch: () -> Unit, dark: Boolean, backdrop: GraphicsLayer, contentOrigin: Offset) {
+    val player by MusicPlayback.state.collectAsState()
+    val track = player.track
+    val dockHeight = maxOf(54.dp, with(LocalDensity.current) { 30.sp.toDp() } + 20.dp)
+    Row(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp).testTag("floating-playback-dock"), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        GlassControlSurface(Modifier.size(48.dp), dark, backdrop, contentOrigin) {
+            GlassIconButton(Icons.Rounded.Home, "Home", onHome, Modifier.fillMaxSize().testTag("nav-Home"))
+        }
+        GlassControlSurface(Modifier.weight(1f).height(dockHeight), dark, backdrop, contentOrigin) {
+            Row(Modifier.fillMaxSize().padding(start = 8.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(50)).glassTouch(onClick = if (track == null) onLibrary else onPlayer).testTag("music-mini-player"), verticalAlignment = Alignment.CenterVertically) {
+                    TrackArtwork(track, Modifier.size(30.dp))
+                    Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+                        Text(track?.title ?: "Nothing playing", fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(track?.artist ?: "Open Library", fontSize = 10.sp, lineHeight = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+                GlassIconButton(if (track == null) Icons.Rounded.LibraryMusic else if (player.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    if (track == null) "Open Library" else if (player.playing) "Pause" else "Play",
+                    if (track == null) onLibrary else MusicPlayback::toggle)
+
+            }
+        }
+        GlassControlSurface(Modifier.size(48.dp), dark, backdrop, contentOrigin) {
+            GlassIconButton(Icons.Rounded.Search, "Search local music", onSearch, Modifier.fillMaxSize().testTag("nav-Search"))
+        }
+    }
+}
+
+@Composable
+internal fun ContextControls(onBack: () -> Unit, onAdd: () -> Unit, onMore: () -> Unit, backLabel: String = "Go back", addLabel: String = "Add to playlist", backIcon: ImageVector = Icons.AutoMirrored.Filled.ArrowBack) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        GlassControlSurface(Modifier.size(48.dp)) {
+            GlassIconButton(backIcon, backLabel, onBack)
+        }
+        Spacer(Modifier.weight(1f))
+        PairedGlassActions(onAdd, onMore, addLabel = addLabel)
+
+    }
+}
+
+@Composable
+internal fun GlassIconButton(icon: ImageVector, label: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, glyph: Dp = 21.dp) {
+    Box(modifier.size(48.dp).clip(RoundedCornerShape(50)).glassTouch(onClick, enabled)
+        .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
+        Icon(icon, null, Modifier.size(glyph), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else .3f))
+    }
+}
+
+/** Anchored, focusable popover: outside touch and Android Back dismiss it. */
+@Composable
+internal fun GlassActionPopover(title: String, onDismiss: () -> Unit, backdrop: GraphicsLayer? = null, contentOrigin: Offset = Offset.Zero,
+    content: @Composable ColumnScope.() -> Unit) {
+    val scene = LocalGlassScene.current
+    GlassPopover(onDismiss) {
+        GlassMenuBlock(backdrop ?: scene?.layer, if (backdrop == null) scene?.origin ?: contentOrigin else contentOrigin) {
+            Column(Modifier.heightIn(max = (LocalConfiguration.current.screenHeightDp.dp - 170.dp).coerceAtLeast(200.dp)).verticalScroll(rememberScrollState())) {
+            Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+            content()
             }
         }
     }
 }
 
-/** A consistent set of rounded line glyphs, drawn on a 24-point grid. */
-@Composable private fun NavigationGlyph(name: String, color: Color, modifier: Modifier) {
-    Canvas(modifier) {
-        val unit = size.width / 24f
-        val stroke = Stroke(width = unit * 1.8f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-        fun point(x: Float, y: Float) = Offset(x * unit, y * unit)
-        fun line(x1: Float, y1: Float, x2: Float, y2: Float) = drawLine(color, point(x1, y1), point(x2, y2), strokeWidth = stroke.width, cap = StrokeCap.Round)
-        fun path(block: Path.() -> Unit) = drawPath(Path().apply(block), color, style = stroke)
-        when (name) {
-            "Home" -> {
-                path { moveTo(3 * unit, 10.5f * unit); lineTo(11 * unit, 3.8f * unit); quadraticTo(12 * unit, 3 * unit, 13 * unit, 3.8f * unit); lineTo(21 * unit, 10.5f * unit) }
-                path { moveTo(5 * unit, 9 * unit); lineTo(5 * unit, 19 * unit); quadraticTo(5 * unit, 21 * unit, 7 * unit, 21 * unit); lineTo(9.5f * unit, 21 * unit); lineTo(9.5f * unit, 15 * unit); quadraticTo(9.5f * unit, 14 * unit, 10.5f * unit, 14 * unit); lineTo(13.5f * unit, 14 * unit); quadraticTo(14.5f * unit, 14 * unit, 14.5f * unit, 15 * unit); lineTo(14.5f * unit, 21 * unit); lineTo(17 * unit, 21 * unit); quadraticTo(19 * unit, 21 * unit, 19 * unit, 19 * unit); lineTo(19 * unit, 9 * unit) }
+@Composable
+internal fun GlassPopover(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    val density = LocalDensity.current
+    val available = (LocalConfiguration.current.screenWidthDp.dp - 32.dp).coerceAtLeast(180.dp)
+    Popup(alignment = Alignment.TopEnd, offset = IntOffset(0, with(density) { 58.dp.roundToPx() }), onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true, clippingEnabled = true)) {
+        val reveal = remember { Animatable(0f) }
+        LaunchedEffect(Unit) { reveal.animateTo(1f, spring(dampingRatio = .78f, stiffness = 400f)) }
+        Column(Modifier.widthIn(max = available).width(252.dp).padding(4.dp).graphicsLayer {
+            alpha = reveal.value.coerceIn(0f, 1f)
+            scaleX = .93f + .07f * reveal.value
+            scaleY = .9f + .1f * reveal.value
+            transformOrigin = TransformOrigin(1f, 0f)
+        }.testTag("glass-popover"), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+    }
+}
+
+@Composable
+internal fun GlassMenuBlock(backdrop: GraphicsLayer? = null, contentOrigin: Offset = Offset.Zero, content: @Composable ColumnScope.() -> Unit) {
+    GlassControlSurface(Modifier.fillMaxWidth(), backdrop = backdrop, contentOrigin = contentOrigin,
+        shape = RoundedCornerShape(24.dp), screenPosition = true) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), content = content)
+    }
+}
+
+@Composable
+internal fun PairedGlassActions(onAdd: () -> Unit, onMore: () -> Unit, addLabel: String = "Phone music", moreLabel: String = "More options",
+    backdrop: GraphicsLayer? = null, contentOrigin: Offset = Offset.Zero) {
+    var active by remember { mutableIntStateOf(-1) }
+    val flex by animateFloatAsState(if (active >= 0) .98f else 1f, spring(dampingRatio = .8f, stiffness = 450f), label = "Joined control flex")
+    GlassControlSurface(Modifier.graphicsLayer { scaleX = flex; scaleY = flex }, backdrop = backdrop, contentOrigin = contentOrigin, flexible = false) {
+        Row(Modifier.padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            val circle = androidx.compose.foundation.shape.CircleShape
+            GlassControlSurface(Modifier.size(48.dp), shape = circle, onPressedChange = { if (it) active = 0 else if (active == 0) active = -1 }) {
+                GlassIconButton(Icons.Rounded.Add, addLabel, onAdd)
             }
-            "Downloads" -> {
-                line(12f, 3f, 12f, 14f); line(8f, 10f, 12f, 14f); line(12f, 14f, 16f, 10f)
-                path { moveTo(4 * unit, 15 * unit); lineTo(4 * unit, 19 * unit); quadraticTo(4 * unit, 21 * unit, 6 * unit, 21 * unit); lineTo(18 * unit, 21 * unit); quadraticTo(20 * unit, 21 * unit, 20 * unit, 19 * unit); lineTo(20 * unit, 15 * unit) }
-            }
-            "Player" -> {
-                drawCircle(color.copy(alpha = .15f), 11 * unit, point(12f, 12f))
-                path { moveTo(9 * unit, 6 * unit); lineTo(18 * unit, 12 * unit); lineTo(9 * unit, 18 * unit); close() }
-            }
-            "Library" -> {
-                line(8f, 2f, 16f, 2f)
-                line(5f, 5f, 19f, 5f)
-                drawRoundRect(color, point(3f, 8f), Size(18 * unit, 13 * unit), CornerRadius(2 * unit), style = stroke)
-                path { moveTo(11 * unit, 17 * unit); lineTo(11 * unit, 12 * unit); lineTo(17 * unit, 11 * unit); lineTo(17 * unit, 16 * unit) }
-                drawOval(color, point(7.5f, 16f), Size(3.5f * unit, 2.8f * unit))
-                drawOval(color, point(13.5f, 15f), Size(3.5f * unit, 2.8f * unit))
-            }
-            "History" -> {
-                drawArc(color, 210f, 310f, false, point(3f, 3f), Size(18 * unit, 18 * unit), style = stroke)
-                path { moveTo(3 * unit, 3.5f * unit); lineTo(3 * unit, 8.5f * unit); lineTo(8 * unit, 8.5f * unit) }
-                line(12f, 7f, 12f, 12f); line(12f, 12f, 15.5f, 14f)
-            }
-            "Settings" -> {
-                val gear = Path()
-                repeat(64) { index ->
-                    val angle = (index * Math.PI / 32 - Math.PI / 2).toFloat()
-                    val radius = if (index % 8 in 2..5) 9.2f else 7.5f
-                    val x = (12f + cos(angle) * radius) * unit
-                    val y = (12f + sin(angle) * radius) * unit
-                    if (index == 0) gear.moveTo(x, y) else gear.lineTo(x, y)
-                }
-                gear.close(); drawPath(gear, color, style = stroke)
-                drawCircle(color, 3.1f * unit, point(12f, 12f), style = stroke)
+            GlassControlSurface(Modifier.size(48.dp), shape = circle, onPressedChange = { if (it) active = 1 else if (active == 1) active = -1 }) {
+                GlassIconButton(Icons.Rounded.MoreHoriz, moreLabel, onMore)
             }
         }
     }
