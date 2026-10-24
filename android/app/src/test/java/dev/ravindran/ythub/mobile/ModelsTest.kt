@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ModelsTest {
+    @Test fun engineChecksAreBoundedAndRecoverAfterClockChanges() {
+        val day = 24L * 60 * 60 * 1000
+        assertTrue(engineUpdateDue(day * 2, 0))
+        assertFalse(engineUpdateDue(day * 2, day * 2 - 1))
+        assertFalse(engineUpdateDue(day * 2, day + 1))
+        assertTrue(engineUpdateDue(day * 2, day))
+        assertTrue(engineUpdateDue(day, day * 2))
+    }
     @Test fun acceptsYouTubeLinks() {
         assertEquals("https://youtu.be/abc", validYouTubeUrl(" https://youtu.be/abc "))
         assertEquals("https://www.youtube.com/playlist?list=abc", validYouTubeUrl("https://www.youtube.com/playlist?list=abc"))

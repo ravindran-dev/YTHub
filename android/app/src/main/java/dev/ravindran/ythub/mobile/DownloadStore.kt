@@ -45,7 +45,11 @@ object DownloadStore {
     val engine = _engine.asStateFlow()
     private val _sharedUrl = MutableStateFlow("")
     val sharedUrl = _sharedUrl.asStateFlow()
-    private var ready = false
+    @Volatile private var ready = false
+    @Volatile private var runtimeVersion = ""
+    private var updatingEngine = false
+    private var preparingQueue = false
+    private val enginePrefs get() = context.getSharedPreferences("ythub-engine", Context.MODE_PRIVATE)
     private val historyFile get() = File(context.filesDir, "downloads.json")
     val workRoot get() = File(context.getExternalFilesDir(null) ?: context.filesDir, "media").apply { mkdirs() }
     fun init(ctx: Context) {
@@ -80,22 +84,44 @@ object DownloadStore {
         try {
             YoutubeDL.getInstance().init(context)
             FFmpeg.getInstance().init(context)
+            runtimeVersion = YoutubeDL.getInstance().execute(YoutubeDLRequest(emptyList<String>()).addOption("--version")).out.trim().removePrefix("yt-dlp ")
             ready = true
             _engine.value = "Local media engine ready"
         } catch (e: Exception) { _engine.value = "Engine unavailable: ${e.message}" }
     }
-    suspend fun updateEngine(): String = withContext(Dispatchers.IO) {
+    suspend fun updateEngine(force: Boolean = true): String = withContext(Dispatchers.IO) {
         initializeEngine()
         check(ready) { _engine.value }
-        synchronized(lock) { check(active.isEmpty()) { "Wait for active downloads before updating the engine." } }
         engineMutex.withLock {
-            YoutubeDL.getInstance().updateYoutubeDL(context, YoutubeDL.UpdateChannel.STABLE)
-            "yt-dlp ${YoutubeDL.getInstance().versionName(context) ?: "updated"}"
+            if (!force && !engineCheckDue()) return@withLock "yt-dlp ${engineVersion()}"
+            synchronized(lock) {
+                check(active.isEmpty() && !updatingEngine) { "Wait for active downloads before updating the engine." }
+                updatingEngine = true
+            }
+            try {
+                _engine.value = "Updating local media engine…"
+                YoutubeDL.getInstance().updateYoutubeDL(context, YoutubeDL.UpdateChannel.STABLE)
+                runtimeVersion = YoutubeDL.getInstance().execute(YoutubeDLRequest(emptyList<String>()).addOption("--version")).out.trim().removePrefix("yt-dlp ")
+                "yt-dlp $runtimeVersion"
+            } finally {
+                // Back off failed network checks too; a queue must not get stuck retrying an update.
+                enginePrefs.edit().putLong("last_check", System.currentTimeMillis()).apply()
+                synchronized(lock) { updatingEngine = false }
+                _engine.value = "Local media engine ready"
+                schedule()
+            }
         }
     }
-    fun engineVersion() = runCatching { YoutubeDL.getInstance().versionName(context) }.getOrNull() ?: "Bundled · 0.18.1"
+    fun engineVersion() = runtimeVersion.ifBlank { "Checking installed version…" }
+    private fun engineCheckDue() = engineUpdateDue(System.currentTimeMillis(), enginePrefs.getLong("last_check", 0))
+    private suspend fun refreshEngineIfDue() {
+        if (!engineCheckDue()) return
+        try { updateEngine(force = false) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Keep the installed engine usable when the update service is offline. */ }
+    }
     private fun request(url: String, options: Preferences): YoutubeDLRequest {
-        val request = YoutubeDLRequest(url).addOption("--ignore-config").addOption("--no-warnings")
+        val request = YoutubeDLRequest(url).addOption("--ignore-config")
             .addOption("--socket-timeout", 30).addOption("--retries", options.retries)
         if (options.proxy.isNotBlank()) request.addOption("--proxy", options.proxy)
         if (options.cookiesPath.isNotBlank()) request.addOption("--cookies", options.cookiesPath)
@@ -105,9 +131,10 @@ object DownloadStore {
         val url = validYouTubeUrl(raw)
         initializeEngine()
         check(ready) { _engine.value }
+        if (synchronized(lock) { active.isEmpty() && !preparingQueue }) refreshEngineIfDue()
         val request = request(url, prefs.value).addOption("--dump-single-json").addOption("--skip-download")
         if (playlist) request.addOption("--flat-playlist").addOption("--playlist-end", 500) else request.addOption("--no-playlist")
-        val result = YoutubeDL.getInstance().execute(request, "analysis-${UUID.randomUUID()}")
+        val result = engineMutex.withLock { YoutubeDL.getInstance().execute(request, "analysis-${UUID.randomUUID()}") }
         parseMedia(JSONObject(result.out.trim()), url)
     }
     private fun parseMedia(json: JSONObject, source: String): MediaInfo {
@@ -145,6 +172,18 @@ object DownloadStore {
     private fun schedule() {
         if (!ready) return
         synchronized(lock) {
+            if (updatingEngine || preparingQueue) return
+            if (active.isEmpty() && _items.value.any { it.state == "Queued" } && engineCheckDue()) {
+                preparingQueue = true
+                scope.launch {
+                    try { refreshEngineIfDue() }
+                    finally {
+                        synchronized(lock) { preparingQueue = false }
+                        schedule()
+                    }
+                }
+                return
+            }
             for (item in _items.value.asReversed()) {
                 if (active.size >= prefs.value.concurrency) break
                 if (item.state != "Queued" || item.id in active) continue

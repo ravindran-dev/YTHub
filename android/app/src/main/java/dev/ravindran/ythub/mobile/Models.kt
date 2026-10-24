@@ -10,6 +10,8 @@ data class Preferences(
     val folderUri: String = "", val folderName: String = "Downloads / YTHub", val retries: Int = 3,
     val proxy: String = "", val cookiesPath: String = "", val onboardingDone: Boolean = false
 )
+/** One official engine check per day, including recovery from a rolled-back system clock. */
+internal fun engineUpdateDue(now: Long, checked: Long): Boolean = checked <= 0L || checked > now || now - checked >= 24L * 60 * 60 * 1000
 data class MediaInfo(
     val url: String, val title: String, val channel: String = "", val thumbnail: String = "",
     val duration: Long = 0, val views: Long = 0, val uploadDate: String = "", val playlist: Boolean = false,
