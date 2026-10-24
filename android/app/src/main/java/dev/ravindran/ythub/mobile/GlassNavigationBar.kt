@@ -72,9 +72,9 @@ internal fun Modifier.glassTouch(onClick: () -> Unit, enabled: Boolean = true): 
         .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
 }
 
-/** Draws the screen behind the glass; labels and touch targets remain sharp. */
+/** Samples only the shared ambient image; scrolling content never enters the blur pass. */
 @Composable
-internal fun GlassBackdrop(layer: GraphicsLayer, origin: Offset, position: Offset, blur: Float, magnification: Float = 1f) {
+internal fun GlassBackdrop(layer: GraphicsLayer, origin: Offset, position: Offset, blur: Float, magnification: Float = 1.035f) {
     val backing = MaterialTheme.colorScheme.background
     Box(Modifier.fillMaxSize().graphicsLayer {
         if (Build.VERSION.SDK_INT >= 31) renderEffect = BlurEffect(blur, blur, TileMode.Clamp)
@@ -84,6 +84,10 @@ internal fun GlassBackdrop(layer: GraphicsLayer, origin: Offset, position: Offse
             // Only the ambient image is sampled. Scrolling rows stay on their own rendering path.
             with(drawContext.canvas) {
                 save()
+                val centre = Offset(size.width / 2f, size.height / 2f)
+                translate(centre.x, centre.y)
+                scale(magnification, magnification)
+                translate(-centre.x, -centre.y)
                 translate(origin.x - position.x, origin.y - position.y)
                 drawLayer(layer)
                 restore()
@@ -92,7 +96,7 @@ internal fun GlassBackdrop(layer: GraphicsLayer, origin: Offset, position: Offse
     })
 }
 
-/** A single frosted surface: the captured content is blurred, never the controls. */
+/** One frosted image layer with a restrained reflective rim; labels stay sharp. */
 @Composable
 internal fun GlassControlSurface(modifier: Modifier = Modifier, dark: Boolean = MaterialTheme.colorScheme.background.luminance() < .5f, backdrop: GraphicsLayer? = null, contentOrigin: Offset = Offset.Zero, shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(50), screenPosition: Boolean = false, flexible: Boolean = true, tintAlpha: Float? = null, onPressedChange: (Boolean) -> Unit = {}, content: @Composable BoxScope.() -> Unit) {
     var origin by remember { mutableStateOf(Offset.Zero) }
@@ -106,12 +110,12 @@ internal fun GlassControlSurface(modifier: Modifier = Modifier, dark: Boolean = 
     val highlightColor = MaterialTheme.colorScheme.onSurface
     val rim = if (dark) Color.White else Color(0xFF424958)
     Box(modifier.graphicsLayer { scaleX = 1f - .025f * compression; scaleY = 1f - .055f * compression }.shadow(4.dp, shape, ambientColor = Color.Black.copy(alpha = .12f), spotColor = Color.Black.copy(alpha = .15f)).clip(shape).onGloballyPositioned { origin = if (screenPosition) it.positionOnScreen() else it.positionInRoot() }
-        .border(.65.dp, Brush.verticalGradient(listOf(rim.copy(alpha = if (dark) .25f else .22f), rim.copy(alpha = if (dark) .04f else .09f), rim.copy(alpha = if (dark) .10f else .16f))), shape)) {
+        .border(.65.dp, Brush.verticalGradient(listOf(rim.copy(alpha = if (dark) .40f else .27f), rim.copy(alpha = if (dark) .06f else .10f), rim.copy(alpha = .18f))), shape)) {
         Box(Modifier.matchParentSize()) {
             if (backdrop != null) GlassBackdrop(backdrop, contentOrigin, origin, 28f)
-            Box(Modifier.fillMaxSize().background(if (dark) Color(0xFF28282D).copy(alpha = tintAlpha ?: .46f) else Color(0xFFDBE0E8).copy(alpha = tintAlpha ?: .86f)))
+            Box(Modifier.fillMaxSize().background(if (dark) Color(0xFF28282D).copy(alpha = tintAlpha ?: .30f) else Color(0xFFE9EDF3).copy(alpha = tintAlpha ?: .72f)))
         }
-        Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(Color.White.copy(alpha = if (dark) .06f else .22f), Color.Transparent))))
+        Box(Modifier.matchParentSize().background(Brush.verticalGradient(0f to Color.White.copy(alpha = if (dark) .14f else .30f), .48f to Color.White.copy(alpha = .015f), 1f to Color.Transparent)))
         Box(Modifier.matchParentSize().drawBehind { drawRect(highlightColor.copy(alpha = highlight)) })
         CompositionLocalProvider(LocalGlassInteraction provides if (flexible) interaction else null) { content() }
     }
@@ -150,8 +154,9 @@ internal fun FloatingPlaybackDock(onHome: () -> Unit, onPlayer: () -> Unit, onLi
 
 @Composable
 internal fun ContextControls(onBack: () -> Unit, onAdd: () -> Unit, onMore: () -> Unit, backLabel: String = "Go back", addLabel: String = "Add to playlist", backIcon: ImageVector = Icons.AutoMirrored.Filled.ArrowBack) {
+    val scene = LocalGlassScene.current
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        GlassControlSurface(Modifier.size(48.dp)) {
+        GlassControlSurface(Modifier.size(48.dp), backdrop = scene?.layer, contentOrigin = scene?.origin ?: Offset.Zero) {
             GlassIconButton(backIcon, backLabel, onBack)
         }
         Spacer(Modifier.weight(1f))
@@ -212,17 +217,14 @@ internal fun GlassMenuBlock(backdrop: GraphicsLayer? = null, contentOrigin: Offs
 @Composable
 internal fun PairedGlassActions(onAdd: () -> Unit, onMore: () -> Unit, addLabel: String = "Phone music", moreLabel: String = "More options",
     backdrop: GraphicsLayer? = null, contentOrigin: Offset = Offset.Zero) {
-    var active by remember { mutableIntStateOf(-1) }
-    val flex by animateFloatAsState(if (active >= 0) .98f else 1f, spring(dampingRatio = .8f, stiffness = 450f), label = "Joined control flex")
-    GlassControlSurface(Modifier.graphicsLayer { scaleX = flex; scaleY = flex }, backdrop = backdrop, contentOrigin = contentOrigin, flexible = false) {
-        Row(Modifier.padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            val circle = androidx.compose.foundation.shape.CircleShape
-            GlassControlSurface(Modifier.size(48.dp), shape = circle, onPressedChange = { if (it) active = 0 else if (active == 0) active = -1 }) {
-                GlassIconButton(Icons.Rounded.Add, addLabel, onAdd)
-            }
-            GlassControlSurface(Modifier.size(48.dp), shape = circle, onPressedChange = { if (it) active = 1 else if (active == 1) active = -1 }) {
-                GlassIconButton(Icons.Rounded.MoreHoriz, moreLabel, onMore)
-            }
+    val scene = LocalGlassScene.current
+    GlassControlSurface(Modifier.height(48.dp).testTag("paired-glass-actions"),
+        backdrop = backdrop ?: scene?.layer,
+        contentOrigin = if (backdrop == null) scene?.origin ?: contentOrigin else contentOrigin) {
+        // Two accessible touch targets, one continuous material and one shared press response.
+        Row(Modifier.padding(horizontal = 3.dp)) {
+            GlassIconButton(Icons.Rounded.Add, addLabel, onAdd, glyph = 22.dp)
+            GlassIconButton(Icons.Rounded.MoreHoriz, moreLabel, onMore, glyph = 22.dp)
         }
     }
 }

@@ -6,6 +6,10 @@ Browsing destinations share one scenic background rather than crossfading identi
 
 Android's large splash icon is replaced with a transparent drawable. The app has no forced logo reveal or minimum loading duration. A small progress indicator is shown only while the real library is loading; ready launches go directly to the app.
 
+## Glass finish
+
+The top Add/More control is one continuous 102 × 48 dp glass capsule, with two 48 dp touch targets and one shared press/haptic response. The icons have no individual circular surfaces, borders or shadows. The capsule, contextual Back button and dock sample the ambient image with a restrained 1.035× lens effect. A brighter reflective rim and reduced tint opacity make the frost visible in both themes. This retains the scene-only blur path above; it does not capture scrolling rows. The refinement passed 21 unit tests and five device checks, including both Add entry points, contextual menus, single haptic/release behavior, light-theme panels/search, playback/next-track and Library navigation. Track IDs and both playlist contents matched the pre-update snapshot.
+
 ## Phone build
 
 `./android/gradlew -p android :app:assemblePreview` builds an internal APK without debugging enabled or UI inspection tooling. It uses the local debug signing configuration so it can update the existing development install without replacing its data. It does not change public release signing. Output: `android/app/build/outputs/apk/preview/app-preview.apk`.
@@ -23,6 +27,7 @@ Frame sampling uses `dumpsys gfxinfo ... reset`, eight alternating 350 ms vertic
 | Original Debug | 24 ms | 40 ms | 23 / 326 (7.06%) |
 | Updated Preview before ahead-of-time compilation | 18 ms | 25 ms | 12 / 339 (3.54%) |
 | Installed Preview after ahead-of-time compilation | 19 ms | 23 ms | 11 / 336 (3.27%) |
+| Refined glass capsule Preview after ahead-of-time compilation | 18 ms | 23 ms | 9 / 339 (2.65%) |
 
 Cold starts after compilation reported 640 ms and 577 ms through `am start -W`. Timed screenshots showed the plain launch surface handing off to Home without the former large static logo. The phone denied screen-recording output paths, so no continuous startup video was captured.
 
