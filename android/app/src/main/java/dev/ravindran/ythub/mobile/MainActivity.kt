@@ -111,6 +111,7 @@ class MainActivity : ComponentActivity() {
     val atmosphereLayer = rememberGraphicsLayer()
     // Glass samples the static artwork layer, never the scrolling content or the spinning disc.
     val screenBackdrop = atmosphereLayer
+    val dockBackdrop = rememberDockGlassState()
     val playerPullOffset = remember { mutableFloatStateOf(0f) }
     val contentOrigin = Offset.Zero
     val dark = preferences.theme == "Dark" || (preferences.theme == "System" && isSystemInDarkTheme())
@@ -214,7 +215,7 @@ class MainActivity : ComponentActivity() {
                         onHome = { navigatingBack = page != "Home"; page = "Home"; detail = null; media = null }, onPlayer = { openPlayer() },
                         onLibrary = ::openLibrary,
                         onSearch = { navigatingBack = false; libraryRootRequested = false; page = "Library"; detail = null; media = null; librarySearch = true },
-                        dark = dark, backdrop = screenBackdrop, contentOrigin = contentOrigin)
+                        dark = dark, dockBackdrop = dockBackdrop)
                 }, topBar = {
                     if ((page == "Player" || page == "Library" && libraryDetailActive) && detail == null && media == null) Spacer(Modifier.statusBarsPadding()) else Row(Modifier.fillMaxWidth().statusBarsPadding().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).padding(horizontal = PagePadding, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (media != null || detail != null || page !in listOf("Home", "Downloads", "Player", "Library", "Settings")) {
@@ -265,7 +266,7 @@ class MainActivity : ComponentActivity() {
                     CompositionLocalProvider(LocalMusicBottomPadding provides if (reserveBottom > 0.dp) 0.dp else inset.calculateBottomPadding()) {
                     AnimatedContent(targetState = when { detail != null -> "detail"; media != null -> "media"; else -> page }, transitionSpec = { MobileMotion.navigation(initialState, targetState, navigatingBack).using(null) }, label = "Navigation", modifier = Modifier
                         .padding(appliedInsets).consumeWindowInsets(appliedInsets).windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)).imePadding()
-                        .fillMaxSize()) { destination ->
+                        .fillMaxSize().captureDockGlass(dockBackdrop, atmosphereLayer, enabled = !keyboardOpen)) { destination ->
                         pageState.SaveableStateProvider(destination) {
                         when (destination) {
                             "Home" -> HomeScreen(url, { url = it }, audio, { audio = it; quality = if (it) preferences.audioQuality else preferences.videoQuality }, quality,

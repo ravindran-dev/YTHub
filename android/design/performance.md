@@ -1,6 +1,6 @@
 # Android motion and scrolling performance
 
-The persistent glass controls sample the shared scenic/artwork layer. They no longer record and blur the scrolling screen or the rotating player disc. Only a change of track or playback status updates the mini-player; position ticks stay in the player. Touch highlights read animation values during drawing, and player drag/settle offsets update graphics layers without recomposing the whole player every frame.
+Top contextual glass samples the shared scenic/artwork layer. The bottom dock uses a dedicated underlay: only the narrow strip beneath it is recorded at half resolution in each dimension, blurred through one shared graphics layer, then sampled by Home, the mini-player and Search. This reveals actual scrolling rows and artwork instead of the almost-black bottom of the faded scenic background. The dock is outside the captured subtree, so it cannot capture itself. No full-screen UI texture is made for the dock. The capture is disabled while the keyboard hides the dock. Surface coordinates are read during drawing, avoiding whole-control recompositions as content moves. Only a change of track or playback status updates the mini-player; position ticks stay in the player. Touch highlights read animation values during drawing, and player drag/settle offsets update graphics layers without recomposing the whole player every frame.
 
 Browsing destinations share one scenic background rather than crossfading identical full-screen images. Navigation uses short translations and fades. Library Back changes the destination immediately, with a short entrance animation instead of waiting for an exit animation. Track, collection and download rows use explicit lazy content types for reuse; song/download placement animations were removed from the scrolling path.
 
@@ -8,7 +8,9 @@ Android's large splash icon is replaced with a transparent drawable. The app has
 
 ## Glass finish
 
-The top Add/More control is one continuous 102 × 48 dp glass capsule, with two 48 dp touch targets and one shared press/haptic response. The icons have no individual circular surfaces, borders or shadows. The capsule, contextual Back button and dock sample the ambient image with a restrained 1.035× lens effect. A brighter reflective rim and reduced tint opacity make the frost visible in both themes. This retains the scene-only blur path above; it does not capture scrolling rows. The refinement passed 21 unit tests and five device checks, including both Add entry points, contextual menus, single haptic/release behavior, light-theme panels/search, playback/next-track and Library navigation. Track IDs and both playlist contents matched the pre-update snapshot.
+The top Add/More control is one continuous 102 × 48 dp glass capsule, with two 48 dp touch targets and one shared press/haptic response. The icons have no individual circular surfaces, borders or shadows. The capsule and contextual Back button sample the ambient image with a restrained 1.035× lens effect. The dock uses the live cropped underlay described above, with lighter tint so real content shows through. A brighter reflective rim and reduced tint opacity make the frost visible in both themes. The contextual controls retain the scene-only blur path. The dock samples only its cropped strip of real content. The refinement passed 21 unit tests and five device checks, including both Add entry points, contextual menus, single haptic/release behavior, light-theme panels/search, playback/next-track and Library navigation. Track IDs and both playlist contents matched the pre-update snapshot.
+
+The live dock change passed 21 unit tests and six device checks: two rendered-pixel tests prove that changing the content beneath the dock changes its visible material in dark and light themes; four existing checks cover search/light panels, real playback/next-track, Library navigation, and player pull-down/Back. Saved song IDs and both playlists were preserved.
 
 ## Phone build
 
@@ -28,6 +30,7 @@ Frame sampling uses `dumpsys gfxinfo ... reset`, eight alternating 350 ms vertic
 | Updated Preview before ahead-of-time compilation | 18 ms | 25 ms | 12 / 339 (3.54%) |
 | Installed Preview after ahead-of-time compilation | 19 ms | 23 ms | 11 / 336 (3.27%) |
 | Refined glass capsule Preview after ahead-of-time compilation | 18 ms | 23 ms | 9 / 339 (2.65%) |
+| Live cropped dock Preview after ahead-of-time compilation | 15 ms | 23 ms | 6 / 337 (1.78%) |
 
 Cold starts after compilation reported 640 ms and 577 ms through `am start -W`. Timed screenshots showed the plain launch surface handing off to Home without the former large static logo. The phone denied screen-recording output paths, so no continuous startup video was captured.
 
