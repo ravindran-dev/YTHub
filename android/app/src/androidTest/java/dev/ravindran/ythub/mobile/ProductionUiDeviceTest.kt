@@ -106,14 +106,15 @@ class GlassInteractionDeviceTest {
         compose.mainClock.autoAdvance = true
     }
 
-    @Test fun logoLoaderWaitsForReadiness() {
+    @Test fun loadingIndicatorWaitsForReadinessWithoutLogoDelay() {
         var ready by mutableStateOf(false)
         val completed = AtomicInteger()
         compose.setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = MobileUi.accent, background = MobileUi.background), typography = musicTypography()) { StartupScreen(ready) { completed.incrementAndGet() } }
         }
         compose.onNodeWithTag("startup-screen").assertIsDisplayed()
-        compose.onNodeWithText("YTHub").assertIsDisplayed()
+        compose.onNodeWithText("Loading your music").assertIsDisplayed()
+        compose.onNodeWithContentDescription("YTHub").assertDoesNotExist()
         assertEquals(0, completed.get())
         capture("startup")
         compose.runOnIdle { ready = true }

@@ -78,6 +78,7 @@ private val CardShape = MobileUi.card
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= 31) splashScreen.setOnExitAnimationListener { it.remove() }
         enableEdgeToEdge()
         receiveShare(intent)
         setContent { YTHubApp() }
@@ -107,10 +108,11 @@ class MainActivity : ComponentActivity() {
     val engine by DownloadStore.engine.collectAsStateWithLifecycle()
     val shared by DownloadStore.sharedUrl.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val screenBackdrop = rememberGraphicsLayer()
     val atmosphereLayer = rememberGraphicsLayer()
+    // Glass samples the static artwork layer, never the scrolling content or the spinning disc.
+    val screenBackdrop = atmosphereLayer
     val playerPullOffset = remember { mutableFloatStateOf(0f) }
-    var contentOrigin by remember { mutableStateOf(Offset.Zero) }
+    val contentOrigin = Offset.Zero
     val dark = preferences.theme == "Dark" || (preferences.theme == "System" && isSystemInDarkTheme())
     DisposableEffect(dark) {
         val bars = if (dark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT) else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
@@ -121,7 +123,6 @@ class MainActivity : ComponentActivity() {
         surfaceVariant = MobileUi.elevated, onSurface = Color(0xFFF8F8FA), onSurfaceVariant = Color(0xFFA3A8B6), outline = Color(0xFF353946))
     else lightColorScheme(primary = Color(0xFFC9002C), onPrimary = Color.White, secondary = Crimson, secondaryContainer = Color(0xFFFFDDE4), onSecondaryContainer = Color(0xFF6C1027), background = Color(0xFFF6F5F3), surface = Color.White,
         surfaceVariant = Color(0xFFEEECEF), onSurface = Color(0xFF171923), onSurfaceVariant = Color(0xFF4D515D), outline = Color(0xFFA8ABB5))
-    var startupDone by rememberSaveable { mutableStateOf(false) }
     val pageState = rememberSaveableStateHolder()
     val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     var librarySearch by remember { mutableStateOf(false) }
@@ -264,13 +265,7 @@ class MainActivity : ComponentActivity() {
                     CompositionLocalProvider(LocalMusicBottomPadding provides if (reserveBottom > 0.dp) 0.dp else inset.calculateBottomPadding()) {
                     AnimatedContent(targetState = when { detail != null -> "detail"; media != null -> "media"; else -> page }, transitionSpec = { MobileMotion.navigation(initialState, targetState, navigatingBack).using(null) }, label = "Navigation", modifier = Modifier
                         .padding(appliedInsets).consumeWindowInsets(appliedInsets).windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)).imePadding()
-                        .fillMaxSize().onGloballyPositioned { contentOrigin = it.positionInRoot() }
-                        .drawWithContent {
-                            if (keyboardOpen) drawContent() else {
-                                screenBackdrop.record { this@drawWithContent.drawContent() }
-                                drawLayer(screenBackdrop)
-                            }
-                        }) { destination ->
+                        .fillMaxSize()) { destination ->
                         pageState.SaveableStateProvider(destination) {
                         when (destination) {
                             "Home" -> HomeScreen(url, { url = it }, audio, { audio = it; quality = if (it) preferences.audioQuality else preferences.videoQuality }, quality,
@@ -328,10 +323,10 @@ class MainActivity : ComponentActivity() {
             if (confirmCancel != null) GlassConfirmDialog(onDismissRequest = { confirmCancel = null }, title = { Text("Cancel this download?") },
                 text = { Text("Downloaded parts are kept so you can retry later.") }, dismissButton = { TextButton(onClick = { confirmCancel = null }) { Text("Keep downloading") } },
                 confirmButton = { TextButton(onClick = { act { DownloadStore.cancel(confirmCancel!!) }; confirmCancel = null }) { Text("Cancel download") } })
-            androidx.compose.animation.AnimatedVisibility(visible = !musicReady || !startupDone,
+            androidx.compose.animation.AnimatedVisibility(visible = !musicReady,
                 enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(180)),
-                exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(360)), modifier = Modifier.matchParentSize()) {
-                StartupScreen(musicReady) { startupDone = true }
+                exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(160)), modifier = Modifier.matchParentSize()) {
+                StartupScreen(musicReady) {}
             }
         }
     }
@@ -460,7 +455,7 @@ class MainActivity : ComponentActivity() {
         FilterTabs(listOf("Active", "Completed", "Failed"), filter) { filter = it }
         if (filtered.isEmpty()) EmptyState(if (filter == "Active") "Your queue is clear" else "No ${filter.lowercase()} downloads", "Paste a YouTube link to save your next favorite.", onHome)
         else LazyColumn(contentPadding = PaddingValues(top = 20.dp, bottom = LocalMusicBottomPadding.current + 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            items(filtered, key = { it.id }) { item -> Box(Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)) { DownloadCard(item, { onDetail(item.id) }, { onPause(item.id) }, { onResume(item.id) }, { onCancel(item.id) }, onPlay = { onPlay(item.id) }, onAdd = if (music.tracks.any { it.downloadId == item.id }) null else { { onAdd(item.id) } }) } }
+            items(filtered, key = { it.id }, contentType = { "download" }) { item -> DownloadCard(item, { onDetail(item.id) }, { onPause(item.id) }, { onResume(item.id) }, { onCancel(item.id) }, onPlay = { onPlay(item.id) }, onAdd = if (music.tracks.any { it.downloadId == item.id }) null else { { onAdd(item.id) } }) }
         }
     }
 }

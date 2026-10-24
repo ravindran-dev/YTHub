@@ -24,6 +24,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,8 +66,9 @@ internal fun Modifier.glassTouch(onClick: () -> Unit, enabled: Boolean = true): 
     val haptics = LocalHapticFeedback.current
     LaunchedEffect(pressed) { if (shared == null && pressed && enabled) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
     val feedback by animateFloatAsState(if (shared == null && pressed) 1f else 0f, spring(dampingRatio = .8f, stiffness = 450f), label = "Row press")
+    val feedbackColor = MaterialTheme.colorScheme.onSurface
     return graphicsLayer { scaleX = 1f - .015f * feedback; scaleY = 1f - .025f * feedback }
-        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = .045f * feedback.coerceIn(0f, 1f)))
+        .drawBehind { drawRect(feedbackColor.copy(alpha = .045f * feedback.coerceIn(0f, 1f))) }
         .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
 }
 
@@ -72,23 +76,14 @@ internal fun Modifier.glassTouch(onClick: () -> Unit, enabled: Boolean = true): 
 @Composable
 internal fun GlassBackdrop(layer: GraphicsLayer, origin: Offset, position: Offset, blur: Float, magnification: Float = 1f) {
     val backing = MaterialTheme.colorScheme.background
-    val atmosphere = LocalAtmosphereLayer.current
     Box(Modifier.fillMaxSize().graphicsLayer {
         if (Build.VERSION.SDK_INT >= 31) renderEffect = BlurEffect(blur, blur, TileMode.Clamp)
     }.drawBehind {
-        // Fill transparent pixels in the recorded content so sharp underlying text cannot bleed through the frost.
         drawRect(backing)
-        if (atmosphere != null && atmosphere.size.width > 0) {
-            with(drawContext.canvas) { save(); translate(-position.x, -position.y); drawLayer(atmosphere); restore() }
-        }
         if (layer.size.width > 0 && layer.size.height > 0) {
-            // Zoom around the glass centre, rather than around the source screen origin.
-            val centre = Offset(size.width / 2, size.height / 2)
+            // Only the ambient image is sampled. Scrolling rows stay on their own rendering path.
             with(drawContext.canvas) {
                 save()
-                translate(centre.x, centre.y)
-                scale(magnification, magnification)
-                translate(-centre.x, -centre.y)
                 translate(origin.x - position.x, origin.y - position.y)
                 drawLayer(layer)
                 restore()
@@ -108,6 +103,7 @@ internal fun GlassControlSurface(modifier: Modifier = Modifier, dark: Boolean = 
     LaunchedEffect(pressed) { onPressedChange(pressed); if (pressed) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
     val compression by animateFloatAsState(if (pressed) 1f else 0f, spring(dampingRatio = .72f, stiffness = 450f), label = "Glass compression")
     val highlight by animateFloatAsState(if (pressed) .10f else if (hovered) .04f else 0f, spring(stiffness = 600f), label = "Glass highlight")
+    val highlightColor = MaterialTheme.colorScheme.onSurface
     val rim = if (dark) Color.White else Color(0xFF424958)
     Box(modifier.graphicsLayer { scaleX = 1f - .025f * compression; scaleY = 1f - .055f * compression }.shadow(4.dp, shape, ambientColor = Color.Black.copy(alpha = .12f), spotColor = Color.Black.copy(alpha = .15f)).clip(shape).onGloballyPositioned { origin = if (screenPosition) it.positionOnScreen() else it.positionInRoot() }
         .border(.65.dp, Brush.verticalGradient(listOf(rim.copy(alpha = if (dark) .25f else .22f), rim.copy(alpha = if (dark) .04f else .09f), rim.copy(alpha = if (dark) .10f else .16f))), shape)) {
@@ -116,15 +112,16 @@ internal fun GlassControlSurface(modifier: Modifier = Modifier, dark: Boolean = 
             Box(Modifier.fillMaxSize().background(if (dark) Color(0xFF28282D).copy(alpha = tintAlpha ?: .46f) else Color(0xFFDBE0E8).copy(alpha = tintAlpha ?: .86f)))
         }
         Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(Color.White.copy(alpha = if (dark) .06f else .22f), Color.Transparent))))
-        Box(Modifier.matchParentSize().background(MaterialTheme.colorScheme.onSurface.copy(alpha = highlight)))
+        Box(Modifier.matchParentSize().drawBehind { drawRect(highlightColor.copy(alpha = highlight)) })
         CompositionLocalProvider(LocalGlassInteraction provides if (flexible) interaction else null) { content() }
     }
 }
 
 @Composable
 internal fun FloatingPlaybackDock(onHome: () -> Unit, onPlayer: () -> Unit, onLibrary: () -> Unit, onSearch: () -> Unit, dark: Boolean, backdrop: GraphicsLayer, contentOrigin: Offset) {
-    val player by MusicPlayback.state.collectAsState()
-    val track = player.track
+    val dockState = remember { MusicPlayback.state.map { it.track to it.playing }.distinctUntilChanged() }
+    val player by dockState.collectAsStateWithLifecycle(initialValue = MusicPlayback.state.value.let { it.track to it.playing })
+    val track = player.first
     val dockHeight = maxOf(54.dp, with(LocalDensity.current) { 30.sp.toDp() } + 20.dp)
     Row(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp).testTag("floating-playback-dock"), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         GlassControlSurface(Modifier.size(48.dp), dark, backdrop, contentOrigin) {
@@ -139,8 +136,8 @@ internal fun FloatingPlaybackDock(onHome: () -> Unit, onPlayer: () -> Unit, onLi
                         Text(track?.artist ?: "Open Library", fontSize = 10.sp, lineHeight = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                GlassIconButton(if (track == null) Icons.Rounded.LibraryMusic else if (player.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    if (track == null) "Open Library" else if (player.playing) "Pause" else "Play",
+                GlassIconButton(if (track == null) Icons.Rounded.LibraryMusic else if (player.second) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    if (track == null) "Open Library" else if (player.second) "Pause" else "Play",
                     if (track == null) onLibrary else MusicPlayback::toggle)
 
             }

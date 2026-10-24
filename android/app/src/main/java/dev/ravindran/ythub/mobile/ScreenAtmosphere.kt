@@ -38,9 +38,8 @@ internal fun ScreenAtmosphere(destination: String, layer: GraphicsLayer) {
         layer.record { this@drawWithContent.drawContent() }
         drawLayer(layer)
     }) {
-        Crossfade(destination to if (destination == "Player") track else null, animationSpec = tween(420), label = "Screen atmosphere") { (page, artwork) ->
+        Crossfade((if (destination == "Player") "Player" else "Browse") to if (destination == "Player") track else null, animationSpec = tween(200), label = "Screen atmosphere") { (page, artwork) ->
             val base = MaterialTheme.colorScheme.background
-            val dark = base.luminance() < .5f
             Box(Modifier.fillMaxSize().background(base)) {
                 when (page) {
                     "Home" -> ScenicAtmosphere()

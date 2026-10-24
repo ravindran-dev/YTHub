@@ -68,19 +68,17 @@ private val Accent = Color(0xFFFF173D)
             Button(onClick = onLibrary, modifier = Modifier.fillMaxWidth()) { Text("Open music library") }
         }; return
     }
-    var pull by remember { mutableFloatStateOf(0f) }
-    var dragging by remember { mutableStateOf(false) }
-    val settle by animateFloatAsState(pull, spring(dampingRatio = .74f, stiffness = 360f), label = "Player water-drop settle")
     val sharedPull = LocalPlayerPullOffset.current
-    SideEffect { sharedPull.floatValue = if (dragging) pull else settle }
-    DisposableEffect(Unit) { onDispose { sharedPull.floatValue = 0f } }
+    val dragScope = rememberCoroutineScope()
+    var settleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    DisposableEffect(Unit) { onDispose { settleJob?.cancel(); sharedPull.floatValue = 0f } }
     val dragThreshold = with(LocalDensity.current) { 86.dp.toPx() }
-    val dragState = rememberDraggableState { delta -> pull = (pull + delta).coerceIn(0f, dragThreshold * 2.5f) }
+    val dragState = rememberDraggableState { delta -> sharedPull.floatValue = (sharedPull.floatValue + delta).coerceIn(0f, dragThreshold * 2.5f) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
     val artworkBudget = maxHeight - 345.dp - with(LocalDensity.current) { 50.sp.toDp() }
     val artworkSize = minOf(maxWidth - 56.dp, maxHeight * .43f, artworkBudget.coerceAtLeast(150.dp)).coerceAtMost(294.dp)
     Column(Modifier.fillMaxSize().graphicsLayer {
-        val displacement = if (dragging) pull else settle
+        val displacement = sharedPull.floatValue
         translationY = displacement
         scaleX = 1f - .035f * (displacement / dragThreshold).coerceIn(0f, 1f)
         scaleY = 1f - .015f * (displacement / dragThreshold).coerceIn(0f, 1f)
@@ -90,11 +88,14 @@ private val Accent = Color(0xFFFF173D)
             Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(Modifier.fillMaxWidth().height(artworkSize).testTag("player-artwork-gesture").draggable(
                     state = dragState, orientation = Orientation.Vertical,
-                    onDragStarted = { dragging = true },
+                    onDragStarted = { settleJob?.cancel() },
                     onDragStopped = { velocity ->
-                        dragging = false
-                        if (pull >= dragThreshold || velocity > 1400f && pull > dragThreshold / 3f) onMinimize()
-                        else pull = 0f
+                        if (sharedPull.floatValue >= dragThreshold || velocity > 1400f && sharedPull.floatValue > dragThreshold / 3f) onMinimize()
+                        else settleJob = dragScope.launch {
+                            androidx.compose.animation.core.Animatable(sharedPull.floatValue).animateTo(0f, spring(dampingRatio = .9f, stiffness = 500f)) {
+                                sharedPull.floatValue = value
+                            }
+                        }
                     }), contentAlignment = Alignment.Center) {
                     DiscArtwork(track, player.index, player.playing, Modifier.fillMaxWidth().height(artworkSize))
                 }

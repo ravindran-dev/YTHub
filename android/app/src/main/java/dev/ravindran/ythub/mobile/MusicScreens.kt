@@ -71,7 +71,7 @@ private val MusicShape = MobileUi.card
     val hue = ((track?.id?.hashCode() ?: 340).toLong().and(0x7fffffff) % 360).toFloat()
     Box(modifier.clip(RoundedCornerShape(12.dp)).background(Brush.linearGradient(listOf(Color.hsl(hue, .45f, .23f), Color(0xFF101923)))), contentAlignment = Alignment.Center) {
         Icon(Icons.Default.MusicNote, null, Modifier.fillMaxSize(.42f), tint = MusicRed.copy(alpha = .85f))
-        if (track?.artwork?.isNotBlank() == true) AsyncImage(File(track.artwork), "Album artwork", Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+        if (track?.artwork?.isNotBlank() == true) AsyncImage(remember(track.artwork) { File(track.artwork) }, "Album artwork", Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
 
     }
 }
@@ -123,20 +123,13 @@ private val MusicShape = MobileUi.card
     LaunchedEffect(category, playlistId, group) { val section = "$category:$playlistId:$group"; if (section != previousSection) { listState.scrollToItem(0); previousSection = section } }
     LaunchedEffect(searching) { if (searching) { listState.scrollToItem(0); withFrameNanos { }; searchFocus.requestFocus() } }
     val sectionReveal = remember { Animatable(1f) }
-    var closingSection by remember { mutableStateOf(false) }
     LaunchedEffect(playlistId, group, category) {
         onDetailChanged(playlistId != null || group != null || category != "Overview" && !searching)
         sectionReveal.snapTo(.96f)
-        sectionReveal.animateTo(1f, spring(dampingRatio = .83f, stiffness = 420f))
+        sectionReveal.animateTo(1f, tween(160))
     }
     fun libraryBack() {
-        if (closingSection) return
-        scope.launch {
-            closingSection = true
-            if (playlistId != null || group != null) sectionReveal.animateTo(.9f, tween(180))
-            when { playlistId != null -> playlistId = null; group != null -> group = null; searching -> { searching = false; query = "" }; else -> category = "Overview" }
-            closingSection = false
-        }
+        when { playlistId != null -> playlistId = null; group != null -> group = null; searching -> { searching = false; query = "" }; else -> category = "Overview" }
     }
     BackHandler(enabled = playlistId != null || group != null || searching || category != "Overview", onBack = ::libraryBack)
     val allById = remember(state.tracks) { state.tracks.associateBy { it.id } }
@@ -164,9 +157,7 @@ private val MusicShape = MobileUi.card
     Box(Modifier.fillMaxSize()) {
     if (playlist != null) ArtworkAtmosphere(state.tracks.firstOrNull { it.id in playlist.tracks }, Modifier.matchParentSize(), strong = false)
     LazyColumn(Modifier.fillMaxSize().graphicsLayer {
-        alpha = ((sectionReveal.value - .9f) * 10f).coerceIn(0f, 1f)
-        translationY = (1f - sectionReveal.value) * 600f
-        scaleX = sectionReveal.value.coerceAtMost(1f)
+        translationY = (1f - sectionReveal.value) * 250f
     }.testTag("music-library-list"), state = listState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = LocalMusicBottomPadding.current + 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -264,15 +255,15 @@ private val MusicShape = MobileUi.card
 
             item { MusicSectionTitle("Your Playlists", action = "Manage", onAction = { category = "Playlists" }) }
             if (state.playlists.isEmpty()) item { MusicPillButton("Create playlist", Icons.Rounded.Add, { create = true; name = "" }, primary = false) }
-            itemsIndexed(state.playlists.take(4), key = { _, p -> p.id }) { _, p -> PlaylistArtworkRow(p, state.tracks) { category = "Playlists"; playlistId = p.id; searching = false; query = "" } }
+            itemsIndexed(state.playlists.take(4), key = { _, p -> p.id }, contentType = { _, _ -> "playlist" }) { _, p -> PlaylistArtworkRow(p, state.tracks) { category = "Playlists"; playlistId = p.id; searching = false; query = "" } }
         } else if (category == "Playlists" && playlist == null) {
             item { MusicPillButton("Create playlist", Icons.Rounded.Add, { create = true; name = "" }) }
-            itemsIndexed(state.playlists, key = { _, p -> p.id }) { _, p ->
+            itemsIndexed(state.playlists, key = { _, p -> p.id }, contentType = { _, _ -> "playlist" }) { _, p ->
                 PlaylistArtworkRow(p, state.tracks) { playlistId = p.id; searching = false; query = "" }
             }
         } else if (category in listOf("Albums", "Artists", "Folders") && group == null) {
             val groups = base.groupBy { when (category) { "Albums" -> it.album; "Artists" -> it.artist; else -> it.folder } }
-            itemsIndexed(groups.keys.sorted(), key = { _, key -> "group-$key" }) { _, key ->
+            itemsIndexed(groups.keys.sorted(), key = { _, key -> "group-$key" }, contentType = { _, _ -> "collection" }) { _, key ->
                 val members = groups[key].orEmpty()
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).glassTouch({ group = key }).padding(vertical = 10.dp, horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -311,7 +302,7 @@ private val MusicShape = MobileUi.card
                 }
             }
             if (!searching && effectiveLayout == "Grid" && playlist == null && selected.isEmpty()) {
-                itemsIndexed(tracks.chunked(2), key = { index, _ -> "grid-$index" }) { _, row ->
+                itemsIndexed(tracks.chunked(2), key = { index, _ -> "grid-$index" }, contentType = { _, _ -> "artwork-pair" }) { _, row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         row.forEach { track -> Column(Modifier.weight(1f)) {
                             MusicArtworkCard(track, modifier = Modifier.fillMaxWidth(), onMore = { options = track }) { MusicPlayback.play(tracks.map { it.id }, tracks.indexOf(track)); onPlayer() }
@@ -320,13 +311,9 @@ private val MusicShape = MobileUi.card
                     }
                 }
 
-            } else itemsIndexed(tracks, key = { index, _ -> trackKeys[index] }) { index, track ->
-                Column(if (searching) Modifier else Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)) {
-                    MusicTrackRow(track, number = playlist?.let { MusicRules.occurrenceIndex(it.tracks, tracks.map { t -> t.id }, index) + 1 }, selected = track.id in selected, selectionActive = selected.isNotEmpty(), showCheckbox = selected.isNotEmpty(), onSelect = { selected = if (track.id in selected) selected - track.id else selected + track.id },
+            } else itemsIndexed(tracks, key = { index, _ -> trackKeys[index] }, contentType = { _, _ -> "track" }) { index, track ->
+                MusicTrackRow(track, number = playlist?.let { MusicRules.occurrenceIndex(it.tracks, tracks.map { t -> t.id }, index) + 1 }, selected = track.id in selected, selectionActive = selected.isNotEmpty(), showCheckbox = selected.isNotEmpty(), onSelect = { selected = if (track.id in selected) selected - track.id else selected + track.id },
                         onPlay = { MusicPlayback.play(playlist?.tracks ?: tracks.map { it.id }, if (playlist != null) MusicRules.occurrenceIndex(playlist.tracks, tracks.map { it.id }, index) else index); onPlayer() }, onMore = { optionsIndex = if (playlist != null) MusicRules.occurrenceIndex(playlist.tracks, tracks.map { it.id }, index) else -1; options = track })
-                    val playlistIndex = playlist?.let { MusicRules.occurrenceIndex(it.tracks, tracks.map { t -> t.id }, index) } ?: -1
-
-                }
             }
             if (tracks.any { !it.available }) item { TextButton(onClick = { MusicRepository.remove(tracks.filterNot { it.available }.map { it.id }.toSet()) }) { Text("Remove unavailable entries") } }
         }
@@ -411,7 +398,7 @@ private val MusicShape = MobileUi.card
             Text("Add to playlist", style = MaterialTheme.typography.titleLarge)
             LazyColumn(Modifier.weight(1f, fill = false)) {
                 if (state.playlists.isEmpty()) item { Text("Create your first playlist below", Modifier.padding(vertical = 16.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                itemsIndexed(state.playlists, key = { _, p -> p.id }) { _, p ->
+                itemsIndexed(state.playlists, key = { _, p -> p.id }, contentType = { _, _ -> "playlist" }) { _, p ->
                     MusicActionRow(p.name, Icons.Rounded.PlaylistPlay, { MusicRepository.addToPlaylist(p.id, ids); onDismiss() }, subtitle = "${p.tracks.size} tracks", forward = true)
                 }
             }

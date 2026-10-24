@@ -21,11 +21,10 @@ internal object MobileMotion {
         val enter = fadeIn(tween(standard))
         val exit = fadeOut(tween(quick))
         return when {
-            to == "Player" -> (fadeIn(tween(220)) + slideInVertically(spring(dampingRatio = .84f, stiffness = 320f)) { it * 3 / 4 } + scaleIn(spring(dampingRatio = .82f, stiffness = 350f), initialScale = .94f)) togetherWith (fadeOut(tween(200)) + scaleOut(tween(300), targetScale = .97f))
-            from == "Player" -> (fadeIn(tween(300)) + scaleIn(spring(dampingRatio = .88f, stiffness = 350f), initialScale = .97f)) togetherWith
-                (fadeOut(tween(280)) + slideOutVertically(tween(420, easing = FastOutSlowInEasing)) { it } + scaleOut(tween(360), targetScale = .94f))
-            back -> (fadeIn(tween(260)) + scaleIn(spring(dampingRatio = .85f, stiffness = 380f), initialScale = .975f)) togetherWith
-                (fadeOut(tween(210)) + slideOutVertically(tween(330, easing = FastOutSlowInEasing)) { it / 5 } + scaleOut(tween(300), targetScale = .97f))
+            to == "Player" -> (fadeIn(tween(180)) + slideInVertically(tween(260, easing = FastOutSlowInEasing)) { it / 2 }) togetherWith fadeOut(tween(120))
+            from == "Player" -> fadeIn(tween(180)) togetherWith
+                (fadeOut(tween(180)) + slideOutVertically(tween(260, easing = FastOutSlowInEasing)) { it / 2 })
+            back -> (fadeIn(tween(160)) + slideInHorizontally(tween(200, easing = FastOutSlowInEasing)) { -it / 24 }) togetherWith fadeOut(tween(100))
             from in tabs && to in tabs -> {
                 val direction = if (tabs.indexOf(to) > tabs.indexOf(from)) 1 else -1
                 (enter + slideInHorizontally(tween(navigation, easing = FastOutSlowInEasing)) { direction * it / 16 }) togetherWith
