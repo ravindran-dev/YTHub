@@ -46,12 +46,16 @@ import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -109,9 +113,14 @@ class MainActivity : ComponentActivity() {
     val shared by DownloadStore.sharedUrl.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val atmosphereLayer = rememberGraphicsLayer()
-    // Glass samples the static artwork layer, never the scrolling content or the spinning disc.
-    val screenBackdrop = atmosphereLayer
+    val screenBackdrop = rememberGraphicsLayer()
+    DisposableEffect(screenBackdrop) {
+        screenBackdrop.scaleX = 2f; screenBackdrop.scaleY = 2f; screenBackdrop.pivotOffset = Offset.Zero
+        if (Build.VERSION.SDK_INT >= 31) screenBackdrop.renderEffect = BlurEffect(14f, 14f, TileMode.Clamp)
+        onDispose { }
+    }
     val dockBackdrop = rememberDockGlassState()
+    val popoverHost = rememberGlassPopoverHost()
     val playerPullOffset = remember { mutableFloatStateOf(0f) }
     val contentOrigin = Offset.Zero
     val dark = preferences.theme == "Dark" || (preferences.theme == "System" && isSystemInDarkTheme())
@@ -203,14 +212,14 @@ class MainActivity : ComponentActivity() {
         if (detail != null) detail = null else if (media != null) media = null else page = when (page) { "Player Settings" -> settingsOrigin; "Player" -> playerOrigin; "Storage", "History", "Logs" -> secondaryOrigin; "Downloads", "Library", "Settings" -> "Home"; else -> "Settings" }
     }
     MaterialTheme(colorScheme = scheme, typography = musicTypography()) {
-        CompositionLocalProvider(LocalAtmosphereLayer provides atmosphereLayer, LocalPlayerPullOffset provides playerPullOffset, LocalGlassScene provides GlassScene(screenBackdrop, contentOrigin)) {
+        CompositionLocalProvider(LocalAtmosphereLayer provides atmosphereLayer, LocalPlayerPullOffset provides playerPullOffset, LocalGlassScene provides GlassScene(screenBackdrop, contentOrigin), LocalGlassPopoverHost provides popoverHost) {
         Surface(Modifier.fillMaxSize(), color = scheme.background) {
             Box(Modifier.fillMaxSize()) {
-            ScreenAtmosphere(if (preferences.onboardingDone) page else "", atmosphereLayer)
+            ScreenAtmosphere(if (preferences.onboardingDone) page else "", atmosphereLayer, screenBackdrop)
             if (!preferences.onboardingDone) {
                 Onboarding(engine) { DownloadStore.savePrefs(preferences.copy(onboardingDone = true)) }
             } else {
-                Scaffold(containerColor = Color.Transparent, snackbarHost = { SnackbarHost(snackbar) }, bottomBar = {
+                Scaffold(modifier = Modifier.semantics { if (popoverHost.entry != null) hideFromAccessibility() }, containerColor = Color.Transparent, snackbarHost = { SnackbarHost(snackbar) }, bottomBar = {
                     if (!keyboardOpen) FloatingPlaybackDock(
                         onHome = { navigatingBack = page != "Home"; page = "Home"; detail = null; media = null }, onPlayer = { openPlayer() },
                         onLibrary = ::openLibrary,
@@ -307,6 +316,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            GlassPopoverOverlay(popoverHost)
             if (phoneMusicRequested) DeviceMusicPicker(null, onDismiss = { phoneMusicRequested = false }, onChooseFiles = { phoneMusicRequested = false; phoneFiles.launch(arrayOf("audio/*")) })
             if (qualitySheet) GlassSheet(onDismissRequest = { qualitySheet = false }) {
                 Column(Modifier.fillMaxWidth().padding(PagePadding).navigationBarsPadding()) {

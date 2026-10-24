@@ -47,6 +47,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -73,13 +74,11 @@ internal fun Modifier.glassTouch(onClick: () -> Unit, enabled: Boolean = true): 
         .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
 }
 
-/** Samples only the shared ambient image; scrolling content never enters the blur pass. */
+/** Samples the shared, already frosted ambient image without filtering each moving panel again. */
 @Composable
-internal fun GlassBackdrop(layer: GraphicsLayer, origin: Offset, position: State<Offset>, blur: Float, magnification: Float = 1.035f) {
+internal fun GlassBackdrop(layer: GraphicsLayer, origin: Offset, position: State<Offset>, magnification: Float = 1.035f) {
     val backing = MaterialTheme.colorScheme.background
-    Box(Modifier.fillMaxSize().graphicsLayer {
-        if (Build.VERSION.SDK_INT >= 31) renderEffect = BlurEffect(blur, blur, TileMode.Clamp)
-    }.drawBehind {
+    Box(Modifier.fillMaxSize().drawBehind {
         drawRect(backing)
         if (layer.size.width > 0 && layer.size.height > 0) {
             // Only the ambient image is sampled. Scrolling rows stay on their own rendering path.
@@ -99,7 +98,7 @@ internal fun GlassBackdrop(layer: GraphicsLayer, origin: Offset, position: State
 
 /** One frosted image layer with a restrained reflective rim; labels stay sharp. */
 @Composable
-internal fun GlassControlSurface(modifier: Modifier = Modifier, dark: Boolean = MaterialTheme.colorScheme.background.luminance() < .5f, backdrop: GraphicsLayer? = null, contentOrigin: Offset = Offset.Zero, shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(50), screenPosition: Boolean = false, flexible: Boolean = true, tintAlpha: Float? = null, onPressedChange: (Boolean) -> Unit = {}, dockBackdrop: DockGlassState? = null, content: @Composable BoxScope.() -> Unit) {
+internal fun GlassControlSurface(modifier: Modifier = Modifier, dark: Boolean = MaterialTheme.colorScheme.background.luminance() < .5f, backdrop: GraphicsLayer? = null, contentOrigin: Offset = Offset.Zero, shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(50), screenPosition: Boolean = false, flexible: Boolean = true, tintAlpha: Float? = null, onPressedChange: (Boolean) -> Unit = {}, dockBackdrop: DockGlassState? = null, magnification: Float = 1.035f, content: @Composable BoxScope.() -> Unit) {
     val origin = remember { mutableStateOf(Offset.Zero) }
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -109,13 +108,14 @@ internal fun GlassControlSurface(modifier: Modifier = Modifier, dark: Boolean = 
     val compression by animateFloatAsState(if (pressed) 1f else 0f, spring(dampingRatio = .72f, stiffness = 450f), label = "Glass compression")
     val highlight by animateFloatAsState(if (pressed) .10f else if (hovered) .04f else 0f, spring(stiffness = 600f), label = "Glass highlight")
     val highlightColor = MaterialTheme.colorScheme.onSurface
-    val rim = if (dark) Color.White else Color(0xFF424958)
+    val rimColors = if (dark) listOf(Color.White.copy(alpha = .40f), Color.White.copy(alpha = .06f), Color.White.copy(alpha = .18f))
+        else listOf(Color.White.copy(alpha = .95f), Color(0xFF7A8090).copy(alpha = .20f), Color.White.copy(alpha = .72f))
     Box(modifier.graphicsLayer { scaleX = 1f - .025f * compression; scaleY = 1f - .055f * compression }.shadow(4.dp, shape, ambientColor = Color.Black.copy(alpha = .12f), spotColor = Color.Black.copy(alpha = .15f)).clip(shape).onGloballyPositioned { origin.value = if (screenPosition) it.positionOnScreen() else it.positionInRoot() }
-        .border(.65.dp, Brush.verticalGradient(listOf(rim.copy(alpha = if (dark) .40f else .27f), rim.copy(alpha = if (dark) .06f else .10f), rim.copy(alpha = .18f))), shape)) {
+        .border(.65.dp, Brush.verticalGradient(rimColors), shape)) {
         Box(Modifier.matchParentSize()) {
             if (dockBackdrop != null) DockGlassBackdrop(dockBackdrop, origin)
-            else if (backdrop != null) GlassBackdrop(backdrop, contentOrigin, origin, 28f)
-            Box(Modifier.fillMaxSize().background(if (dark) Color(0xFF28282D).copy(alpha = tintAlpha ?: .30f) else Color(0xFFE9EDF3).copy(alpha = tintAlpha ?: .72f)))
+            else if (backdrop != null) GlassBackdrop(backdrop, contentOrigin, origin, magnification)
+            Box(Modifier.fillMaxSize().background(if (dark) Color(0xFF28282D).copy(alpha = tintAlpha ?: .30f) else Color.White.copy(alpha = tintAlpha ?: .64f)))
         }
         Box(Modifier.matchParentSize().background(Brush.verticalGradient(0f to Color.White.copy(alpha = if (dark) .14f else .30f), .48f to Color.White.copy(alpha = .015f), 1f to Color.Transparent)))
         Box(Modifier.matchParentSize().drawBehind { drawRect(highlightColor.copy(alpha = highlight)) })
@@ -128,16 +128,16 @@ internal fun FloatingPlaybackDock(onHome: () -> Unit, onPlayer: () -> Unit, onLi
     val dockState = remember { MusicPlayback.state.map { it.track to it.playing }.distinctUntilChanged() }
     val player by dockState.collectAsStateWithLifecycle(initialValue = MusicPlayback.state.value.let { it.track to it.playing })
     val track = player.first
-    val dockHeight = maxOf(54.dp, with(LocalDensity.current) { 30.sp.toDp() } + 20.dp)
-    val tint = if (dark) .16f else .38f
+    val dockHeight = maxOf(56.dp, with(LocalDensity.current) { 30.sp.toDp() } + 20.dp)
+    val tint = if (dark) .16f else .56f
     Row(Modifier.fillMaxWidth().onGloballyPositioned { dockBackdrop.bounds = it.boundsInRoot() }.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp).testTag("floating-playback-dock"), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        GlassControlSurface(Modifier.size(48.dp), dark, dockBackdrop = dockBackdrop, tintAlpha = tint) {
+        GlassControlSurface(Modifier.size(50.dp), dark, dockBackdrop = dockBackdrop, tintAlpha = tint) {
             GlassIconButton(Icons.Rounded.Home, "Home", onHome, Modifier.fillMaxSize().testTag("nav-Home"))
         }
         GlassControlSurface(Modifier.weight(1f).height(dockHeight).testTag("dock-glass-player"), dark, dockBackdrop = dockBackdrop, tintAlpha = tint) {
             Row(Modifier.fillMaxSize().padding(start = 8.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Row(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(50)).glassTouch(onClick = if (track == null) onLibrary else onPlayer).testTag("music-mini-player"), verticalAlignment = Alignment.CenterVertically) {
-                    TrackArtwork(track, Modifier.size(30.dp))
+                    TrackArtwork(track, Modifier.size(32.dp))
                     Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
                         Text(track?.title ?: "Nothing playing", fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(track?.artist ?: "Open Library", fontSize = 10.sp, lineHeight = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -149,7 +149,7 @@ internal fun FloatingPlaybackDock(onHome: () -> Unit, onPlayer: () -> Unit, onLi
 
             }
         }
-        GlassControlSurface(Modifier.size(48.dp), dark, dockBackdrop = dockBackdrop, tintAlpha = tint) {
+        GlassControlSurface(Modifier.size(50.dp), dark, dockBackdrop = dockBackdrop, tintAlpha = tint) {
             GlassIconButton(Icons.Rounded.Search, "Search local music", onSearch, Modifier.fillMaxSize().testTag("nav-Search"))
         }
     }
@@ -196,24 +196,28 @@ internal fun GlassActionPopover(title: String, onDismiss: () -> Unit, backdrop: 
 internal fun GlassPopover(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     val density = LocalDensity.current
     val available = (LocalConfiguration.current.screenWidthDp.dp - 32.dp).coerceAtLeast(180.dp)
-    Popup(alignment = Alignment.TopEnd, offset = IntOffset(0, with(density) { 58.dp.roundToPx() }), onDismissRequest = onDismiss,
-        properties = PopupProperties(focusable = true, clippingEnabled = true)) {
+    val host = LocalGlassPopoverHost.current
+    val view = LocalView.current
+    val panel: @Composable () -> Unit = {
         val reveal = remember { Animatable(0f) }
-        LaunchedEffect(Unit) { reveal.animateTo(1f, spring(dampingRatio = .78f, stiffness = 400f)) }
+        LaunchedEffect(Unit) { reveal.animateTo(1f, spring(dampingRatio = .82f, stiffness = 520f)) }
         Column(Modifier.widthIn(max = available).width(252.dp).padding(4.dp).graphicsLayer {
             alpha = reveal.value.coerceIn(0f, 1f)
-            scaleX = .93f + .07f * reveal.value
-            scaleY = .9f + .1f * reveal.value
+            scaleX = .88f + .12f * reveal.value
+            scaleY = .80f + .20f * reveal.value
+            translationY = -8.dp.toPx() * (1f - reveal.value)
             transformOrigin = TransformOrigin(1f, 0f)
         }.testTag("glass-popover"), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
     }
+    if (host != null && host.view === view) HostedGlassPopover(host, onDismiss, panel)
+    else Popup(alignment = Alignment.TopEnd, offset = IntOffset(0, with(density) { 58.dp.roundToPx() }), onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true, clippingEnabled = true), content = panel)
 }
 
 @Composable
 internal fun GlassMenuBlock(backdrop: GraphicsLayer? = null, contentOrigin: Offset = Offset.Zero, content: @Composable ColumnScope.() -> Unit) {
-    GlassControlSurface(Modifier.fillMaxWidth(), backdrop = backdrop, contentOrigin = contentOrigin,
-        shape = RoundedCornerShape(24.dp), screenPosition = true) {
-        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), content = content)
+    LiquidGlassPanel(Modifier.fillMaxWidth(), backdrop = backdrop, contentOrigin = contentOrigin, radius = 28.dp) {
+        Column(Modifier.fillMaxWidth().padding(6.dp), content = content)
     }
 }
 

@@ -121,12 +121,12 @@ internal object DeviceMusicCatalog {
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error); TextButton(onClick = { revision++ }) { Text("Try again") } }
                 LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("phone-music-list"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (visible.isEmpty() && !loading && error == null) item { Text(if (query.isBlank()) "No audio found yet. You can also choose a file below." else "No matching songs.", Modifier.padding(vertical = 20.dp)) }
-                    items(visible, key = { it.uri }) { song ->
+                    items(visible, key = { it.uri }, contentType = { "phone-song" }) { song ->
                         val added = song.uri in already
                         val checked = added || song.uri in selected
                         fun toggle() { selected = if (song.uri in selected) selected - song.uri else selected + song.uri }
-                        Surface(shape = MaterialTheme.shapes.medium) {
-                            Row(Modifier.fillMaxWidth().clickable(enabled = !added && !busy) { toggle() }.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .045f)) {
+                            Row(Modifier.fillMaxWidth().glassTouch(onClick = { toggle() }, enabled = !added && !busy).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Checkbox(checked, { toggle() }, enabled = !added && !busy)
                                 Column(Modifier.weight(1f).padding(start = 6.dp)) {
                                     Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis)

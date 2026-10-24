@@ -430,7 +430,7 @@ private val MusicShape = MobileUi.card
             AnimatedContent(section, modifier = Modifier.weight(1f, fill = false), transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(100)) }, label = "Track action page") { page ->
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
                     if (page == "Actions") {
-                        Surface(shape = MobileUi.card, color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .6f)) {
+                        Surface(shape = MobileUi.card, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .045f)) {
                             Column {
                                 if (playback.track?.id != track.id) MusicActionRow("Play now", Icons.Rounded.PlayArrow, { MusicPlayback.play(listOf(track.id)); onDismiss() }, enabled = track.available)
                                 MusicActionRow("Play next", Icons.Rounded.PlaylistPlay, { MusicPlayback.enqueue(listOf(track.id), true); onDismiss() }, enabled = track.available)
@@ -441,7 +441,7 @@ private val MusicShape = MobileUi.card
                         }
                         if (extraActions.isNotEmpty()) {
                             Spacer(Modifier.height(8.dp))
-                            Surface(shape = MobileUi.card, color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .6f)) {
+                            Surface(shape = MobileUi.card, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .045f)) {
                                 Column { extraActions.forEach { (label, action) -> MusicActionRow(label, when {
                                     label.startsWith("Skip backward") -> Icons.Rounded.FastRewind
                                     label.startsWith("Skip forward") -> Icons.Rounded.FastForward

@@ -15,10 +15,13 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
+import kotlin.math.ceil
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import java.io.File
@@ -30,12 +33,16 @@ internal val LocalAtmosphereLayer = staticCompositionLocalOf<GraphicsLayer?> { n
 
 /** A separate background layer allows the glass to sample imagery without capturing itself. */
 @Composable
-internal fun ScreenAtmosphere(destination: String, layer: GraphicsLayer) {
+internal fun ScreenAtmosphere(destination: String, layer: GraphicsLayer, frostedLayer: GraphicsLayer) {
     val playerPull = LocalPlayerPullOffset.current
     val trackFlow = remember { MusicPlayback.state.map { it.track }.distinctUntilChanged() }
     val track by trackFlow.collectAsStateWithLifecycle(initialValue = MusicPlayback.state.value.track)
     Box(Modifier.fillMaxSize().drawWithContent {
         layer.record { this@drawWithContent.drawContent() }
+        // Filter the ambient image once at quarter pixel count. Moving panels only sample it.
+        frostedLayer.record(size = IntSize(ceil(size.width / 2f).toInt(), ceil(size.height / 2f).toInt())) {
+            scale(.5f, .5f, androidx.compose.ui.geometry.Offset.Zero) { drawLayer(layer) }
+        }
         drawLayer(layer)
     }) {
         Crossfade((if (destination == "Player") "Player" else "Browse") to if (destination == "Player") track else null, animationSpec = tween(200), label = "Screen atmosphere") { (page, artwork) ->
