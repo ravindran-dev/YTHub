@@ -129,10 +129,10 @@ import kotlin.math.roundToInt
     Slider(value = value.coerceIn(valueRange), onValueChange = onValueChange, valueRange = valueRange,
         onValueChangeFinished = onValueChangeFinished, enabled = enabled, interactionSource = interaction,
         modifier = modifier.heightIn(min = 48.dp).semantics { contentDescription = description },
-        thumb = { Box(Modifier.size(10.dp).background(Color.White, CircleShape)) },
+        thumb = { Box(Modifier.size(10.dp).offset(y = 4.dp).background(Color.White, CircleShape)) },
         track = {
-            Canvas(Modifier.fillMaxWidth().height(48.dp)) {
-                val height = thickness.dp.toPx()
+            Canvas(Modifier.fillMaxWidth().height(thickness.dp)) {
+                val height = size.height
                 val top = (size.height - height) / 2f
                 val radius = CornerRadius(height / 2f)
                 drawRoundRect(remainingInk.copy(alpha = if (enabled) .18f else .06f), Offset(0f, top), Size(size.width, height), radius)
