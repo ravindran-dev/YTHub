@@ -15,15 +15,15 @@ import androidx.compose.ui.unit.dp
 internal object MobileMotion {
     const val quick = 140
     const val standard = 220
-    const val navigation = 260
+    const val navigation = 220
     fun navigation(from: String, to: String, back: Boolean = false): ContentTransform {
         val tabs = listOf("Home", "Downloads", "Library", "Settings")
         val enter = fadeIn(tween(standard))
         val exit = fadeOut(tween(quick))
         return when {
-            to == "Player" -> (fadeIn(tween(180)) + slideInVertically(tween(260, easing = FastOutSlowInEasing)) { it / 2 }) togetherWith fadeOut(tween(120))
+            to == "Player" -> (fadeIn(tween(180)) + slideInVertically(tween(220, easing = FastOutSlowInEasing)) { it / 3 }) togetherWith fadeOut(tween(120))
             from == "Player" -> fadeIn(tween(180)) togetherWith
-                (fadeOut(tween(180)) + slideOutVertically(tween(260, easing = FastOutSlowInEasing)) { it / 2 })
+                (fadeOut(tween(180)) + slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { it / 3 })
             back -> (fadeIn(tween(160)) + slideInHorizontally(tween(200, easing = FastOutSlowInEasing)) { -it / 24 }) togetherWith fadeOut(tween(100))
             from in tabs && to in tabs -> {
                 val direction = if (tabs.indexOf(to) > tabs.indexOf(from)) 1 else -1

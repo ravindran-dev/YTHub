@@ -131,16 +131,16 @@ internal fun FloatingPlaybackDock(onHome: () -> Unit, onPlayer: () -> Unit, onLi
     val dockHeight = maxOf(56.dp, with(LocalDensity.current) { 30.sp.toDp() } + 20.dp)
     val tint = if (dark) .16f else .56f
     Row(Modifier.fillMaxWidth().onGloballyPositioned { dockBackdrop.bounds = it.boundsInRoot() }.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp).testTag("floating-playback-dock"), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        GlassControlSurface(Modifier.size(50.dp), dark, dockBackdrop = dockBackdrop, tintAlpha = tint) {
+        GlassControlSurface(Modifier.size(54.dp), dark, dockBackdrop = dockBackdrop, tintAlpha = tint) {
             GlassIconButton(Icons.Rounded.Home, "Home", onHome, Modifier.fillMaxSize().testTag("nav-Home"))
         }
         GlassControlSurface(Modifier.weight(1f).height(dockHeight).testTag("dock-glass-player"), dark, dockBackdrop = dockBackdrop, tintAlpha = tint) {
             Row(Modifier.fillMaxSize().padding(start = 8.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Row(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(50)).glassTouch(onClick = if (track == null) onLibrary else onPlayer).testTag("music-mini-player"), verticalAlignment = Alignment.CenterVertically) {
-                    TrackArtwork(track, Modifier.size(32.dp))
+                    TrackArtwork(track, Modifier.size(40.dp))
                     Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                        Text(track?.title ?: "Nothing playing", fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(track?.artist ?: "Open Library", fontSize = 10.sp, lineHeight = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(track?.title ?: "Nothing playing", fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(track?.artist ?: "Open Library", fontSize = 11.sp, lineHeight = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 GlassIconButton(if (track == null) Icons.Rounded.LibraryMusic else if (player.second) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
@@ -149,7 +149,7 @@ internal fun FloatingPlaybackDock(onHome: () -> Unit, onPlayer: () -> Unit, onLi
 
             }
         }
-        GlassControlSurface(Modifier.size(50.dp), dark, dockBackdrop = dockBackdrop, tintAlpha = tint) {
+        GlassControlSurface(Modifier.size(54.dp), dark, dockBackdrop = dockBackdrop, tintAlpha = tint) {
             GlassIconButton(Icons.Rounded.Search, "Search local music", onSearch, Modifier.fillMaxSize().testTag("nav-Search"))
         }
     }
@@ -231,6 +231,7 @@ internal fun PairedGlassActions(onAdd: () -> Unit, onMore: () -> Unit, addLabel:
         // Two accessible touch targets, one continuous material and one shared press response.
         Row(Modifier.padding(horizontal = 3.dp)) {
             GlassIconButton(Icons.Rounded.Add, addLabel, onAdd, glyph = 22.dp)
+            Box(Modifier.width(.7.dp).height(22.dp).align(Alignment.CenterVertically).background(Color.White.copy(alpha = .12f)))
             GlassIconButton(Icons.Rounded.MoreHoriz, moreLabel, onMore, glyph = 22.dp)
         }
     }

@@ -62,7 +62,7 @@ import kotlin.math.roundToInt
 
 /** System media volume, shared with the hardware buttons and the active Android audio route. */
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable internal fun PlayerVolume() {
+@Composable internal fun PlayerVolume(showOutputAction: Boolean = true) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
     val audio = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
@@ -92,7 +92,7 @@ import kotlin.math.roundToInt
         Icon(Icons.Rounded.VolumeUp, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
     }
     if (fixed) Text("Volume is controlled by the connected device", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
-    TextButton(onClick = {
+    if (showOutputAction) TextButton(onClick = {
         runCatching { context.startActivity(Intent(if (Build.VERSION.SDK_INT >= 29) Settings.Panel.ACTION_VOLUME else Settings.ACTION_SOUND_SETTINGS)) }
             .recoverCatching { context.startActivity(Intent(Settings.ACTION_SOUND_SETTINGS)) }
             .onFailure { MusicPlayback.error.value = "Android audio settings are unavailable: ${it.message}" }
@@ -124,17 +124,18 @@ import kotlin.math.roundToInt
     val fraction = ((value - valueRange.start) / range).coerceIn(0f, 1f)
     val progress by animateFloatAsState(fraction, if (engaged) snap() else tween(220, easing = LinearOutSlowInEasing), label = "Slider progress")
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
-    val sliderInk = MaterialTheme.colorScheme.onSurface
+    val sliderInk = MobileUi.accent
+    val remainingInk = MaterialTheme.colorScheme.onSurface
     Slider(value = value.coerceIn(valueRange), onValueChange = onValueChange, valueRange = valueRange,
         onValueChangeFinished = onValueChangeFinished, enabled = enabled, interactionSource = interaction,
         modifier = modifier.heightIn(min = 48.dp).semantics { contentDescription = description },
-        thumb = { Box(Modifier.size(0.dp)) },
+        thumb = { Box(Modifier.size(10.dp).background(Color.White, CircleShape)) },
         track = {
             Canvas(Modifier.fillMaxWidth().height(48.dp)) {
                 val height = thickness.dp.toPx()
                 val top = (size.height - height) / 2f
                 val radius = CornerRadius(height / 2f)
-                drawRoundRect(sliderInk.copy(alpha = if (enabled) .12f else .06f), Offset(0f, top), Size(size.width, height), radius)
+                drawRoundRect(remainingInk.copy(alpha = if (enabled) .18f else .06f), Offset(0f, top), Size(size.width, height), radius)
                 val width = size.width * progress
                 if (width > 0f) drawRoundRect(sliderInk.copy(alpha = opacity), Offset(if (rtl) size.width - width else 0f, top), Size(width, height), radius)
             }

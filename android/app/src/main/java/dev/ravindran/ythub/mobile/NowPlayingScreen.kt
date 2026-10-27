@@ -75,17 +75,19 @@ private val Accent = Color(0xFFFF173D)
     val dragThreshold = with(LocalDensity.current) { 86.dp.toPx() }
     val dragState = rememberDraggableState { delta -> sharedPull.floatValue = (sharedPull.floatValue + delta).coerceIn(0f, dragThreshold * 2.5f) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
-    val artworkBudget = maxHeight - 345.dp - with(LocalDensity.current) { 50.sp.toDp() }
-    val artworkSize = minOf(maxWidth - 56.dp, maxHeight * .43f, artworkBudget.coerceAtLeast(150.dp)).coerceAtMost(294.dp)
+    val availableHeight = maxHeight
+    val availableWidth = maxWidth
+    val artworkBudget = maxHeight - (if (maxHeight < 560.dp) 365.dp else 380.dp) - with(LocalDensity.current) { 50.sp.toDp() }
+    val artworkSize = minOf(maxWidth - 32.dp, maxHeight * .38f, artworkBudget.coerceAtLeast(96.dp)).coerceAtMost(310.dp)
     Column(Modifier.fillMaxSize().graphicsLayer {
         val displacement = sharedPull.floatValue
         translationY = displacement
         scaleX = 1f - .035f * (displacement / dragThreshold).coerceIn(0f, 1f)
         scaleY = 1f - .015f * (displacement / dragThreshold).coerceIn(0f, 1f)
     }.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        ContextControls(onBack = onMinimize, onAdd = onPhoneMusic, onMore = { options = true }, backLabel = "Minimize player", addLabel = "Phone music", backIcon = Icons.Rounded.KeyboardArrowDown)
-        Surface(Modifier.fillMaxWidth().padding(top = 6.dp), shape = RoundedCornerShape(24.dp), color = Color.Transparent) {
-            Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        ContextControls(onBack = onMinimize, onAdd = { addPlaylist = true }, onMore = { options = true }, backLabel = "Minimize player", addLabel = "Add to playlist", backIcon = Icons.Rounded.KeyboardArrowDown)
+        Surface(Modifier.fillMaxWidth().padding(top = if (availableHeight > 650.dp) 22.dp else 4.dp), shape = RoundedCornerShape(24.dp), color = Color.Transparent) {
+            Column(Modifier.padding(horizontal = 0.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(Modifier.fillMaxWidth().height(artworkSize).testTag("player-artwork-gesture").draggable(
                     state = dragState, orientation = Orientation.Vertical,
                     onDragStarted = { settleJob?.cancel() },
@@ -102,8 +104,8 @@ private val Accent = Color(0xFFFF173D)
                 Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Crossfade(track, modifier = Modifier.weight(1f), animationSpec = tween(180), label = "Song title") { shown ->
                         Column {
-                            Text(shown.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
-                            Text(shown.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            Text(shown.title, fontSize = if (availableWidth < 340.dp) 20.sp else 23.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold, maxLines = if (availableHeight < 560.dp) 1 else 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
+                            Text(shown.artist, fontSize = 15.sp, modifier = Modifier.padding(top = 5.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                         }
                     }
                     PlayerControl(if (track.id in library.favorites) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder, "Toggle favorite", { MusicRepository.favorite(track.id) }, active = track.id in library.favorites)
@@ -111,7 +113,7 @@ private val Accent = Color(0xFFFF173D)
                 var seeking by remember(track.id) { mutableStateOf<Float?>(null) }
                 val duration = player.duration.coerceAtLeast(1)
                 key(track.id) {
-                    GlassPlayerSlider(value = seeking ?: player.position.toFloat().coerceIn(0f, duration.toFloat()),
+                    WaveformProgress(track.id, value = seeking ?: player.position.toFloat().coerceIn(0f, duration.toFloat()),
                         onValueChange = { seeking = it },
                         onValueChangeFinished = { seeking?.let { MusicPlayback.seek(it.toLong()) }; seeking = null },
                         valueRange = 0f..duration.toFloat(), enabled = player.duration > 0,
@@ -124,22 +126,23 @@ private val Accent = Color(0xFFFF173D)
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                     PlayerControl(Icons.Rounded.Shuffle, "Shuffle ${if (player.shuffle) "on" else "off"}", MusicPlayback::shuffle, active = player.shuffle, glyph = 20.dp)
-                    PlayerControl(Icons.Rounded.FastRewind, "Previous track", MusicPlayback::previous, glyph = 32.dp)
-                    Box(Modifier.size(72.dp).clip(CircleShape).glassTouch(MusicPlayback::toggle).testTag("primary-playback")
+                    PlayerControl(Icons.Rounded.SkipPrevious, "Previous track", MusicPlayback::previous, glyph = 32.dp)
+                    Box(Modifier.size(if (availableHeight < 600.dp) 64.dp else 72.dp).drawBehind { drawCircle(Brush.radialGradient(listOf(Accent.copy(alpha = .14f), Color.Transparent)), radius = size.minDimension * .75f) }.border(3.dp, Accent, CircleShape).clip(CircleShape).glassTouch(MusicPlayback::toggle).testTag("primary-playback")
                         .semantics { contentDescription = if (player.playing) "Pause" else "Play" }, contentAlignment = Alignment.Center) {
                         Icon(if (player.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, Modifier.size(46.dp), tint = MaterialTheme.colorScheme.onSurface)
                     }
-                    PlayerControl(Icons.Rounded.FastForward, "Next track", MusicPlayback::next, enabled = player.queue.size > 1, glyph = 32.dp)
+                    PlayerControl(Icons.Rounded.SkipNext, "Next track", MusicPlayback::next, enabled = player.queue.size > 1, glyph = 32.dp)
                     PlayerControl(if (player.repeat == 1) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, "Repeat ${listOf("off", "one", "all")[player.repeat]}", MusicPlayback::repeat, active = player.repeat > 0, glyph = 20.dp)
                 }
-                PlayerVolume()
+
             }
         }
-        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-            TextButton(onClick = { panel = "Queue" }, modifier = Modifier.weight(1f)) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Rounded.QueueMusic, null, Modifier.size(20.dp)); Text("Queue", style = MaterialTheme.typography.labelSmall) } }
-            TextButton(onClick = { panel = "Lyrics" }, modifier = Modifier.weight(1f)) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Rounded.Lyrics, null, Modifier.size(20.dp)); Text("Lyrics", style = MaterialTheme.typography.labelSmall) } }
-            TextButton(onClick = { panel = "Timer" }, modifier = Modifier.weight(1f)) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Rounded.Timer, null, Modifier.size(20.dp)); Text("Timer", style = MaterialTheme.typography.labelSmall) } }
-        }
+        PlayerActionRow(
+            onLyrics = { panel = "Lyrics" },
+            onQueue = { MusicPlayback.enqueue(listOf(track.id)); panel = "Queue" },
+            onTimer = { panel = "Timer" }, onOutput = { panel = "Output" }, onMore = { options = true })
+        Spacer(Modifier.height(if (availableHeight > 650.dp) 20.dp else 4.dp))
+        PlayerVolume(showOutputAction = false)
         if (player.sleepMode != "Off") Text("Sleep: ${if (player.sleepDeadline > 0) durationLabel(((player.sleepDeadline - SystemClock.elapsedRealtime()) / 1000).coerceAtLeast(0)) else player.sleepMode}", style = MaterialTheme.typography.labelSmall, color = Accent)
         Spacer(Modifier.height(12.dp))
     }
@@ -149,6 +152,7 @@ private val Accent = Color(0xFFFF173D)
         when (panel) {
             "Queue" -> QueuePanel(onSave = { saveQueue = true }, onDownload = onDownload)
             "Lyrics" -> LyricsPanel(track, player)
+            "Output" -> AudioOutputPanel()
             "Audio" -> Column { MusicActionRow("All player settings", Icons.Rounded.Settings, { panel = ""; onSettings() }, forward = true); PlayerSettingsScreen(audioOnly = true) }
             "Timer" -> SleepPanel { panel = "" }
         }

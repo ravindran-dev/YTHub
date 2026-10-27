@@ -37,7 +37,8 @@ internal fun ScreenAtmosphere(destination: String, layer: GraphicsLayer, frosted
     val playerPull = LocalPlayerPullOffset.current
     val trackFlow = remember { MusicPlayback.state.map { it.track }.distinctUntilChanged() }
     val track by trackFlow.collectAsStateWithLifecycle(initialValue = MusicPlayback.state.value.track)
-    Box(Modifier.fillMaxSize().drawWithContent {
+    // Retain the static atmosphere independently of scrolling foreground invalidations.
+    Box(Modifier.fillMaxSize().graphicsLayer { }.drawWithContent {
         layer.record { this@drawWithContent.drawContent() }
         // Filter the ambient image once at quarter pixel count. Moving panels only sample it.
         frostedLayer.record(size = IntSize(ceil(size.width / 2f).toInt(), ceil(size.height / 2f).toInt())) {
@@ -89,9 +90,8 @@ internal fun ArtworkAtmosphere(track: LocalTrack?, modifier: Modifier = Modifier
                 scaleX = 1.08f; scaleY = 1.08f
             }, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter)
         } else {
-            val hue = ((track?.id?.hashCode() ?: 340).toLong().and(0x7fffffff) % 360).toFloat()
             Box(Modifier.fillMaxSize().background(Brush.radialGradient(listOf(
-                Color.hsl(hue, .42f, if (dark) .23f else .83f).copy(alpha = if (strong) .8f else .28f), base))))
+                Color(0xFF8D142A).copy(alpha = if (strong) .8f else .50f), base))))
         }
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to base.copy(alpha = if (strong) .48f else .35f),
             .30f to base.copy(alpha = if (strong) .18f else .65f), .68f to base.copy(alpha = .89f), 1f to base)))

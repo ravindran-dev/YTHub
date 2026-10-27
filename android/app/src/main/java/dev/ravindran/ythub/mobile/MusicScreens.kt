@@ -68,9 +68,9 @@ private val MusicRed = Color(0xFFFF173D)
 private val MusicShape = MobileUi.card
 
 @Composable internal fun TrackArtwork(track: LocalTrack?, modifier: Modifier = Modifier) {
-    val hue = ((track?.id?.hashCode() ?: 340).toLong().and(0x7fffffff) % 360).toFloat()
-    Box(modifier.clip(RoundedCornerShape(12.dp)).background(Brush.linearGradient(listOf(Color.hsl(hue, .45f, .23f), Color(0xFF101923)))), contentAlignment = Alignment.Center) {
-        Icon(Icons.Default.MusicNote, null, Modifier.fillMaxSize(.42f), tint = MusicRed.copy(alpha = .85f))
+    Box(modifier.clip(RoundedCornerShape(12.dp)).background(Brush.linearGradient(listOf(Color(0xFF35111C), Color(0xFF101317)))), contentAlignment = Alignment.Center) {
+        Icon(Icons.Default.MusicNote, null, Modifier.fillMaxSize(.38f), tint = MusicRed.copy(alpha = .85f))
+        Text("YTHub", Modifier.align(Alignment.BottomCenter).padding(bottom = 3.dp), color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.SemiBold)
         if (track?.artwork?.isNotBlank() == true) AsyncImage(remember(track.artwork) { File(track.artwork) }, "Album artwork", Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
 
     }
@@ -139,7 +139,9 @@ private val MusicShape = MobileUi.card
     val searchIndex = remember(state.tracks) { state.tracks.associate { track -> track.id to "${track.title} ${track.artist} ${track.album} ${track.filename}".lowercase() } }
     val normalizedQuery = remember(searchQuery) { searchQuery.lowercase() }
     val playlistIds = remember(playlist) { playlist?.tracks?.toSet() }
-    val base by produceState(emptyList<LocalTrack>(), state.tracks, state.favorites, state.history, source, category, playlistIds, group, searchQuery) { value = withContext(Dispatchers.Default) { state.tracks.filter { track ->
+    val base by produceState(emptyList<LocalTrack>(), state.tracks, state.favorites, state.history, source, category, playlistIds, group, searchQuery) {
+        if (searchQuery.isNotBlank()) kotlinx.coroutines.delay(120)
+        value = withContext(Dispatchers.Default) { state.tracks.filter { track ->
         (source == "All sources" || (source == "Downloaded") == (track.downloadId != null)) &&
         (category != "Favorites" || track.id in state.favorites) &&
         (category != "Recently Played" || track.id in state.history) &&
@@ -148,11 +150,15 @@ private val MusicShape = MobileUi.card
         (normalizedQuery.isBlank() || searchIndex[track.id].orEmpty().contains(normalizedQuery))
     } } }
     val byId = remember(base) { base.associateBy { it.id } }
-    val tracks = remember(base, playlist, sort, category, state.history) { if (playlist != null) playlist.tracks.mapNotNull { id -> byId[id] } else when (if (category == "Recently Played") "Recently played" else if (category == "Recently Added") "Recently added" else sort) {
+    val sortedTracks = produceState(emptyList<LocalTrack>(), base, playlist, sort, category, state.history) { value = withContext(Dispatchers.Default) { if (playlist != null) playlist.tracks.mapNotNull { id -> byId[id] } else when (if (category == "Recently Played") "Recently played" else if (category == "Recently Added") "Recently added" else sort) {
         "Title" -> base.sortedBy { it.title.lowercase() }; "Artist" -> base.sortedBy { it.artist.lowercase() }
         "Duration" -> base.sortedByDescending { it.durationMs }; "File size" -> base.sortedByDescending { it.bytes }
         "Recently played" -> base.sortedByDescending { state.history[it.id]?.lastPlayed ?: 0 }; else -> base.sortedByDescending { it.added }
-    } }
+    } } }
+    // The lazy item count and occurrence keys must come from the same snapshot.
+    val tracks = sortedTracks.value
+    val recentPlayed = remember(state.tracks, state.history) { state.tracks.filter { it.id in state.history }.sortedByDescending { state.history[it.id]?.lastPlayed }.take(12) }
+    val recentAdded = remember(state.tracks) { state.tracks.sortedByDescending { it.added }.take(12) }
     val trackKeys = remember(tracks) { motionTrackKeys(tracks.map { it.id }) }
     Box(Modifier.fillMaxSize()) {
     if (playlist != null) ArtworkAtmosphere(state.tracks.firstOrNull { it.id in playlist.tracks }, Modifier.matchParentSize(), strong = false)
@@ -250,8 +256,8 @@ private val MusicShape = MobileUi.card
                     }
                 }
             }
-            item { MusicShelf("Recently Played", state.tracks.filter { it.id in state.history }.sortedByDescending { state.history[it.id]?.lastPlayed }, "Your recent listens will appear here.", { category = "Recently Played" }) { track -> MusicPlayback.play(listOf(track.id)); onPlayer() } }
-            item { MusicShelf("Recently Added", state.tracks.sortedByDescending { it.added }, "Download or import audio to start your collection.", { category = "Recently Added" }) { track -> MusicPlayback.play(listOf(track.id)); onPlayer() } }
+            item { MusicShelf("Recently Played", recentPlayed, "Your recent listens will appear here.", { category = "Recently Played" }) { track -> MusicPlayback.play(listOf(track.id)); onPlayer() } }
+            item { MusicShelf("Recently Added", recentAdded, "Download or import audio to start your collection.", { category = "Recently Added" }) { track -> MusicPlayback.play(listOf(track.id)); onPlayer() } }
 
             item { MusicSectionTitle("Your Playlists", action = "Manage", onAction = { category = "Playlists" }) }
             if (state.playlists.isEmpty()) item { MusicPillButton("Create playlist", Icons.Rounded.Add, { create = true; name = "" }, primary = false) }

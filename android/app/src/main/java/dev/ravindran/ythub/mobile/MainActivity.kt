@@ -123,6 +123,7 @@ class MainActivity : ComponentActivity() {
     val popoverHost = rememberGlassPopoverHost()
     val playerPullOffset = remember { mutableFloatStateOf(0f) }
     val contentOrigin = Offset.Zero
+    var page by rememberSaveable { mutableStateOf("Home") }
     val dark = preferences.theme == "Dark" || (preferences.theme == "System" && isSystemInDarkTheme())
     DisposableEffect(dark) {
         val bars = if (dark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT) else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
@@ -139,7 +140,6 @@ class MainActivity : ComponentActivity() {
     var libraryRootRequested by remember { mutableStateOf(false) }
     var libraryDetailActive by remember { mutableStateOf(false) }
     var requestedPlaylist by remember { mutableStateOf<String?>(null) }
-    var page by rememberSaveable { mutableStateOf("Home") }
     var navigatingBack by remember { mutableStateOf(false) }
     var playerOrigin by rememberSaveable { mutableStateOf("Library") }
     var settingsOrigin by rememberSaveable { mutableStateOf("Settings") }
@@ -372,6 +372,8 @@ class MainActivity : ComponentActivity() {
     activeCount: Int = 0, onDownloads: () -> Unit = {}, onLibrary: () -> Unit = {}, onPlayer: () -> Unit = {}, onOpenPlaylist: (String) -> Unit = {}) {
     val context = LocalContext.current
     val library by MusicRepository.state.collectAsStateWithLifecycle()
+    val recentDownloads = remember(library.tracks) { library.tracks.filter { it.downloadId != null }.sortedByDescending { it.added }.take(3) }
+    val recentPlayed = remember(library.tracks, library.history) { library.tracks.filter { it.id in library.history }.sortedByDescending { library.history[it.id]?.lastPlayed }.take(3) }
     val keyboard = LocalSoftwareKeyboardController.current
     var advanced by rememberSaveable { mutableStateOf(false) }
     fun analyze() { keyboard?.hide(); if (!busy && url.isNotBlank() && engine.contains("ready")) onAnalyze() }
@@ -412,8 +414,8 @@ class MainActivity : ComponentActivity() {
             OutlinedButton(onClick = onDownloads, modifier = Modifier.weight(1f), shape = RoundedCornerShape(50)) { Text("Downloads", maxLines = 1) }
             OutlinedButton(onClick = onLibrary, modifier = Modifier.weight(1f).testTag("home-library"), shape = RoundedCornerShape(50)) { Text("Library", maxLines = 1) }
         }
-        MusicRecentList("Recently Downloaded", library.tracks.filter { it.downloadId != null }.sortedByDescending { it.added }, "Your downloaded songs appear here.", onDownloads) { MusicPlayback.play(listOf(it.id)); onPlayer() }
-        MusicRecentList("Recently Played", library.tracks.filter { it.id in library.history }.sortedByDescending { library.history[it.id]?.lastPlayed }, "Your recent listens appear here.", onLibrary) { MusicPlayback.play(listOf(it.id)); onPlayer() }
+        MusicRecentList("Recently Downloaded", recentDownloads, "Your downloaded songs appear here.", onDownloads) { MusicPlayback.play(listOf(it.id)); onPlayer() }
+        MusicRecentList("Recently Played", recentPlayed, "Your recent listens appear here.", onLibrary) { MusicPlayback.play(listOf(it.id)); onPlayer() }
         Text("Playlists", style = MaterialTheme.typography.titleMedium)
         library.playlists.take(4).forEach { PlaylistArtworkRow(it, library.tracks) { onOpenPlaylist(it.id) } }
         ChoiceRow("Save location", prefs.folderName, Icons.Default.FolderOpen, onStorage)
