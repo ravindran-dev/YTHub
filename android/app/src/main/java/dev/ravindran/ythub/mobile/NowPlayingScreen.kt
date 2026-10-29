@@ -159,6 +159,9 @@ private val Accent = Color(0xFFFF173D)
         }
     }
     if (options) TrackOptions(track, onDismiss = { options = false }, onPlaylist = { options = false; addPlaylist = true }, onDownload = onDownload, extraActions = listOf(
+        "Lyrics" to { options = false; panel = "Lyrics" },
+        "Sleep timer" to { options = false; panel = "Timer" },
+        "Audio output" to { options = false; panel = "Output" },
         "Skip backward ${library.settings.skipBackward}s" to { MusicPlayback.seek(player.position - library.settings.skipBackward * 1000); options = false },
         "Skip forward ${library.settings.skipForward}s" to { MusicPlayback.seek(player.position + library.settings.skipForward * 1000); options = false }
     ))

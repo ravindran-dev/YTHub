@@ -1,0 +1,11 @@
+# Cloud development setup
+
+1. Create one Supabase project shared by both clients. Enable email confirmation, configure SMTP, and enforce a minimum 12-character password policy. Configure confirmation and recovery templates to show `{{ .Token }}` for the code-entry screens.
+2. Apply all SQL files in supabase/migrations in filename order using Supabase migrations or the SQL editor. Review grants and policies before deployment.
+3. Deploy `supabase/functions/account-files/index.ts` as account-files. Its server environment requires SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and SUPABASE_ANON_KEY. These are backend runtime settings; never copy the service key into clients. Keep JWT verification enabled and configure it for the project's signing configuration.
+4. Copy .env.example to an ignored .env.local for desktop. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY. Android reads SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY from environment variables or Gradle properties at build time. Use the identical project URL. Only public publishable credentials belong in either application.
+5. Run npm install, npm run build, npm test and cargo check --manifest-path src-tauri/Cargo.toml. Android: run ./gradlew :app:testDebugUnitTest :app:assembleDebug in android with JDK 17 and an Android SDK configured.
+6. Linux desktop secure storage requires an unlocked Secret Service keyring. Windows uses Credential Manager; macOS uses Keychain. Preview browser sessions are memory-only. Custom Supabase domains need matching Tauri CSP connect-src entries.
+7. Test two real accounts and two devices: signup/verification/recovery, refresh/restart, signout, cross-user reads and guessed object paths, offline favorites/playlists, reconnect, conflicts, upload cancellation/retry, quota exhaustion, checksum failure, second-device download, cloud deletion and account deletion.
+
+No project credentials were supplied and no hosted deployment has been verified. Provider delivery, Edge execution, private Storage operations and cross-device synchronization must pass these live checks before release. No OAuth providers or callback redirects are required for the implemented email-code flow. Local music and downloads remain available without cloud configuration.

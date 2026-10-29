@@ -209,7 +209,7 @@ class MainActivity : ComponentActivity() {
     }
     BackHandler(enabled = detail != null || media != null || page != "Home") {
         navigatingBack = true
-        if (detail != null) detail = null else if (media != null) media = null else page = when (page) { "Player Settings" -> settingsOrigin; "Player" -> playerOrigin; "Storage", "History", "Logs" -> secondaryOrigin; "Downloads", "Library", "Settings" -> "Home"; else -> "Settings" }
+        if (detail != null) detail = null else if (media != null) media = null else page = when (page) { "Player Settings" -> settingsOrigin; "Player" -> playerOrigin; "Storage", "History", "Logs", "Account" -> secondaryOrigin; "Cloud Library" -> "Account"; "Downloads", "Library", "Settings" -> "Home"; else -> "Settings" }
     }
     MaterialTheme(colorScheme = scheme, typography = musicTypography()) {
         CompositionLocalProvider(LocalAtmosphereLayer provides atmosphereLayer, LocalPlayerPullOffset provides playerPullOffset, LocalGlassScene provides GlassScene(screenBackdrop, contentOrigin), LocalGlassPopoverHost provides popoverHost) {
@@ -228,7 +228,8 @@ class MainActivity : ComponentActivity() {
                 }, topBar = {
                     if ((page == "Player" || page == "Library" && libraryDetailActive) && detail == null && media == null) Spacer(Modifier.statusBarsPadding()) else Row(Modifier.fillMaxWidth().statusBarsPadding().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).padding(horizontal = PagePadding, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (media != null || detail != null || page !in listOf("Home", "Downloads", "Player", "Library", "Settings")) {
-                            GlassControlSurface(Modifier.size(48.dp), dark) { GlassIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Go back", { navigatingBack = true; if (detail != null) detail = null else if (media != null) media = null else page = if (page == "Player Settings") settingsOrigin else secondaryOrigin }) }
+                            GlassControlSurface(Modifier.size(48.dp), dark) { GlassIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Go back", { navigatingBack = true; if (detail != null) detail = null else if (media != null) media = null else page = if (page == "Player Settings") settingsOrigin else if (page == "Cloud Library") "Account" else secondaryOrigin }) }
+                            Spacer(Modifier.width(12.dp))
                             Text(if (detail != null) "Download details" else if (media != null) if (media!!.playlist) "Playlist details" else "Media details" else page, fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                             if (media != null || detail != null) {
                                 var contextMenu by remember { mutableStateOf(false) }
@@ -258,7 +259,7 @@ class MainActivity : ComponentActivity() {
                                 addLabel = "Phone music", moreLabel = "App menu", backdrop = screenBackdrop, contentOrigin = contentOrigin)
                             if (appMenu) GlassPopover({ appMenu = false }) {
                                 listOf(listOf("Home" to Icons.Default.Home, "Library" to Icons.Default.LibraryMusic, "Downloads" to Icons.Default.Download),
-                                    listOf("Settings" to Icons.Default.Settings, "History" to Icons.Default.History)).forEach { group ->
+                                    listOf("Account" to Icons.Default.AccountCircle, "Settings" to Icons.Default.Settings, "History" to Icons.Default.History)).forEach { group ->
                                     GlassMenuBlock(screenBackdrop, contentOrigin) {
                                         group.forEach { (destination, icon) ->
                                             MusicActionRow(destination, icon, { appMenu = false; if (destination == "Library") openLibrary() else openSecondary(destination) })
@@ -293,6 +294,8 @@ class MainActivity : ComponentActivity() {
                             "Library" -> MusicLibraryScreen(onDetailChanged = { libraryDetailActive = it }, onPlayer = { openPlayer() }, onDownload = { navigatingBack = false; detail = it }, rootRequested = libraryRootRequested, onRootConsumed = { libraryRootRequested = false }, requestedPlaylist = requestedPlaylist, onPlaylistConsumed = { requestedPlaylist = null }, searchRequested = librarySearch, onSearchConsumed = { librarySearch = false })
                             "Player" -> NowPlayingScreen(onLibrary = ::openLibrary, onSettings = { openPlayerSettings() }, onDownload = { navigatingBack = false; detail = it }, onMinimize = { navigatingBack = true; page = playerOrigin }, onPhoneMusic = { phoneMusicRequested = true })
                             "Player Settings" -> PlayerSettingsScreen(onStorage = { openSecondary("Storage") })
+                            "Account" -> AccountScreen(onCloudLibrary = { page = "Cloud Library" })
+                            "Cloud Library" -> CloudLibraryScreen()
                             "History" -> HistoryScreen(jobs, { detail = it }, { page = "Home" })
                             "detail" -> jobs.find { it.id == detail }?.let { item -> DownloadDetail(item,
                                 onPause = { act { DownloadStore.pause(item.id) } }, onResume = { act { DownloadStore.resume(item.id) } }, onCancel = { confirmCancel = item.id },
@@ -732,7 +735,24 @@ class MainActivity : ComponentActivity() {
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Text(title, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(value, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp)) }
 }
 @Composable private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
-    MusicSettingsSection(title, "", initiallyExpanded = title == "DOWNLOADS", content = content)
+    val label=when(title) {
+        "DOWNLOADS" -> "Downloads"
+        "FORMAT & QUALITY" -> "Format & quality"
+        "PLAYLISTS" -> "Playlists"
+        "APPEARANCE & NOTIFICATIONS" -> "Appearance & notifications"
+        "STORAGE" -> "Storage"
+        "MEDIA ENGINE" -> "Media engine & tools"
+        else -> title
+    }
+    val summary=when(title) {
+        "DOWNLOADS" -> "Location, queue and automatic downloads"
+        "FORMAT & QUALITY" -> "Audio and video preferences"
+        "PLAYLISTS" -> "Ordering, archives and saved files"
+        "APPEARANCE & NOTIFICATIONS" -> "Theme and completion alerts"
+        "STORAGE" -> "Manage files and device space"
+        else -> "Updates, network and diagnostics"
+    }
+    MusicSettingsSection(label, summary, initiallyExpanded = title == "DOWNLOADS", content = content)
 }
 @Composable private fun SelectSetting(title: String, value: String, options: List<String>, display: (String) -> String = { it }, onSelect: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }

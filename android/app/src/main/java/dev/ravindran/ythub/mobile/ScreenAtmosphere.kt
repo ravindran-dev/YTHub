@@ -36,7 +36,7 @@ internal val LocalAtmosphereLayer = staticCompositionLocalOf<GraphicsLayer?> { n
 internal fun ScreenAtmosphere(destination: String, layer: GraphicsLayer, frostedLayer: GraphicsLayer) {
     val playerPull = LocalPlayerPullOffset.current
     val trackFlow = remember { MusicPlayback.state.map { it.track }.distinctUntilChanged() }
-    val track by trackFlow.collectAsStateWithLifecycle(initialValue = MusicPlayback.state.value.track)
+    val track by trackFlow.collectAsStateWithLifecycle(initialValue = remember { MusicPlayback.state.value.track })
     // Retain the static atmosphere independently of scrolling foreground invalidations.
     Box(Modifier.fillMaxSize().graphicsLayer { }.drawWithContent {
         layer.record { this@drawWithContent.drawContent() }

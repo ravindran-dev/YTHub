@@ -165,4 +165,4 @@ export interface EngineVersion {
   version: string | null;
   error: string | null;
 }
-export type Page = "dashboard" | "downloads" | "history" | "settings" | "about";
+export type Page = "dashboard" | "downloads" | "history" | "settings" | "about" | "account";

@@ -99,6 +99,7 @@ internal fun GlassBackdrop(layer: GraphicsLayer, origin: Offset, position: State
 /** One frosted image layer with a restrained reflective rim; labels stay sharp. */
 @Composable
 internal fun GlassControlSurface(modifier: Modifier = Modifier, dark: Boolean = MaterialTheme.colorScheme.background.luminance() < .5f, backdrop: GraphicsLayer? = null, contentOrigin: Offset = Offset.Zero, shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(50), screenPosition: Boolean = false, flexible: Boolean = true, tintAlpha: Float? = null, onPressedChange: (Boolean) -> Unit = {}, dockBackdrop: DockGlassState? = null, magnification: Float = 1.035f, content: @Composable BoxScope.() -> Unit) {
+    val ambientBackdrop = LocalAtmosphereLayer.current
     val origin = remember { mutableStateOf(Offset.Zero) }
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -115,6 +116,7 @@ internal fun GlassControlSurface(modifier: Modifier = Modifier, dark: Boolean = 
         Box(Modifier.matchParentSize()) {
             if (dockBackdrop != null) DockGlassBackdrop(dockBackdrop, origin)
             else if (backdrop != null) GlassBackdrop(backdrop, contentOrigin, origin, magnification)
+            else if (ambientBackdrop != null) GlassBackdrop(ambientBackdrop, Offset.Zero, origin, magnification)
             Box(Modifier.fillMaxSize().background(if (dark) Color(0xFF28282D).copy(alpha = tintAlpha ?: .30f) else Color.White.copy(alpha = tintAlpha ?: .64f)))
         }
         Box(Modifier.matchParentSize().background(Brush.verticalGradient(0f to Color.White.copy(alpha = if (dark) .14f else .30f), .48f to Color.White.copy(alpha = .015f), 1f to Color.Transparent)))
@@ -126,10 +128,10 @@ internal fun GlassControlSurface(modifier: Modifier = Modifier, dark: Boolean = 
 @Composable
 internal fun FloatingPlaybackDock(onHome: () -> Unit, onPlayer: () -> Unit, onLibrary: () -> Unit, onSearch: () -> Unit, dark: Boolean, dockBackdrop: DockGlassState) {
     val dockState = remember { MusicPlayback.state.map { it.track to it.playing }.distinctUntilChanged() }
-    val player by dockState.collectAsStateWithLifecycle(initialValue = MusicPlayback.state.value.let { it.track to it.playing })
+    val player by dockState.collectAsStateWithLifecycle(initialValue = remember { MusicPlayback.state.value.let { it.track to it.playing } })
     val track = player.first
     val dockHeight = maxOf(56.dp, with(LocalDensity.current) { 30.sp.toDp() } + 20.dp)
-    val tint = if (dark) .16f else .56f
+    val tint = if (dark) .10f else .28f
     Row(Modifier.fillMaxWidth().onGloballyPositioned { dockBackdrop.bounds = it.boundsInRoot() }.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp).testTag("floating-playback-dock"), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         GlassControlSurface(Modifier.size(54.dp), dark, dockBackdrop = dockBackdrop, tintAlpha = tint) {
             GlassIconButton(Icons.Rounded.Home, "Home", onHome, Modifier.fillMaxSize().testTag("nav-Home"))

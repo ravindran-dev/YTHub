@@ -23,7 +23,8 @@ data class DownloadItem(
     val line: String = "Waiting for a download slot", val eta: Long = 0, val bytes: Long = 0,
     val uris: List<String> = emptyList(), val mime: String = "", val zipUri: String = "", val error: String = "",
     val options: Preferences = Preferences(), val completedCount: Int = 0, val failedCount: Int = 0,
-    val exportedNames: List<String> = emptyList()
+    val exportedNames: List<String> = emptyList(),
+    val cloudRecord: String? = null, val accountId: String? = null, val playWhenReady: Boolean = false, val cloudAttempts: Int = 0, val retryAfter: Long = 0
 ) {
     val terminal: Boolean get() = state in listOf("Completed", "Failed", "Cancelled")
     val working: Boolean get() = state in listOf("Downloading", "Processing", "Exporting", "Zipping")

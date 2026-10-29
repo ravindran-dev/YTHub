@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.dp
 /** Shared liquid material. The gesture observer never consumes taps, drags or scroll events. */
 @Composable
 internal fun LiquidGlassPanel(modifier: Modifier = Modifier, backdrop: GraphicsLayer? = null,
-    contentOrigin: Offset = Offset.Zero, radius: Dp = 28.dp, content: @Composable BoxScope.() -> Unit) {
+    contentOrigin: Offset = Offset.Zero, radius: Dp = 28.dp, animateOnTouch: Boolean = true, content: @Composable BoxScope.() -> Unit) {
     val scene = LocalGlassScene.current
     val dark = MaterialTheme.colorScheme.background.luminance() < .5f
     var pressed by remember { mutableStateOf(false) }
@@ -34,7 +34,7 @@ internal fun LiquidGlassPanel(modifier: Modifier = Modifier, backdrop: GraphicsL
     val pressure by animateFloatAsState(if (pressed) 1f else 0f,
         spring(dampingRatio = .8f, stiffness = 520f), label = "Liquid panel pressure")
     GlassControlSurface(modifier.graphicsLayer {
-        val force = pressure.coerceIn(-.15f, 1f)
+        val force = if(animateOnTouch) pressure.coerceIn(-.15f, 1f) else 0f
         val point = touch.value
         val bias = if (point.isSpecified && size.width > 0f) (point.x / size.width - .5f).coerceIn(-.5f, .5f) else 0f
         scaleX = 1f - .008f * force
@@ -46,7 +46,7 @@ internal fun LiquidGlassPanel(modifier: Modifier = Modifier, backdrop: GraphicsL
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             touch.value = down.position
-            pressed = true
+            pressed = animateOnTouch
             try {
                 do {
                     val event = awaitPointerEvent(PointerEventPass.Final)

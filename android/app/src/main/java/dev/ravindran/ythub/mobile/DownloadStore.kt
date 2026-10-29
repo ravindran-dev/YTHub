@@ -27,7 +27,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 class YTHubApplication : Application() {
-    override fun onCreate() { super.onCreate(); DownloadStore.init(this); MusicRepository.init(this); MusicPlayback.init(this) }
+    override fun onCreate() { super.onCreate(); DownloadStore.init(this); MusicRepository.init(this); MusicPlayback.init(this); CloudAccount.init(this) }
 }
 
 object DownloadStore {
@@ -168,6 +168,38 @@ object DownloadStore {
     private fun ensureService() {
         ContextCompat.startForegroundService(context, Intent(context, DownloadService::class.java))
     }
+    fun enqueueCloud(record: com.google.gson.JsonObject, play: Boolean): String {
+        val owner=CloudAccount.state.value.userId ?: error("Sign in first")
+        val objectId=record.get("id").asString
+        val id="cloud-$owner-$objectId"
+        synchronized(lock) {
+            val existing=_items.value.find {it.id==id}
+            if(existing!=null && !existing.terminal) return id
+            val item=DownloadItem(id,MediaInfo("cloud://$objectId",record.get("display_name").asString),true,"original",cloudRecord=record.toString(),accountId=owner,playWhenReady=play,options=prefs.value)
+            _items.value=_items.value.filterNot {it.id==id}+item;persist()
+        }
+        ensureService();schedule();return id
+    }
+    var cloudExternalStorage: Boolean
+        get()=context.getSharedPreferences("cloud-download-prefs",0).getBoolean("externalStorage",false)
+        set(value){context.getSharedPreferences("cloud-download-prefs",0).edit().putBoolean("externalStorage",value).apply()}
+    var cloudStorageReserveMb: Int
+        get()=context.getSharedPreferences("cloud-download-prefs",0).getInt("storageReserve",64).coerceIn(16,512)
+        set(value){context.getSharedPreferences("cloud-download-prefs",0).edit().putInt("storageReserve",value.coerceIn(16,512)).apply()}
+    var cloudWifiOnly: Boolean
+        get()=context.getSharedPreferences("cloud-download-prefs",0).getBoolean("wifiOnly",false)
+        set(value){context.getSharedPreferences("cloud-download-prefs",0).edit().putBoolean("wifiOnly",value).apply();schedule()}
+    var cloudConcurrency: Int
+        get()=context.getSharedPreferences("cloud-download-prefs",0).getInt("concurrency",1).coerceIn(1,3)
+        set(value){context.getSharedPreferences("cloud-download-prefs",0).edit().putInt("concurrency",value.coerceIn(1,3)).apply();schedule()}
+    private fun cloudNetworkAllowed():Boolean {
+        if(!cloudWifiOnly)return true
+        val manager=context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        return manager.getNetworkCapabilities(manager.activeNetwork)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)==true
+    }
+    var cloudAutoRetry: Boolean
+        get()=context.getSharedPreferences("cloud-download-prefs",0).getBoolean("autoRetry",true)
+        set(value){context.getSharedPreferences("cloud-download-prefs",0).edit().putBoolean("autoRetry",value).apply()}
     fun startQueue() { schedule() }
     private fun schedule() {
         if (!ready) return
@@ -187,10 +219,33 @@ object DownloadStore {
             for (item in _items.value.asReversed()) {
                 if (active.size >= prefs.value.concurrency) break
                 if (item.state != "Queued" || item.id in active) continue
+                if(item.cloudRecord!=null && item.retryAfter>System.currentTimeMillis()) {scope.launch {delay((item.retryAfter-System.currentTimeMillis()).coerceAtLeast(1));schedule()};continue}
+                if(item.cloudRecord!=null && (!cloudNetworkAllowed() || _items.value.count {it.id in active && it.cloudRecord!=null}>=cloudConcurrency)) {
+                    scope.launch {delay(15000);schedule()};continue
+                }
                 active.add(item.id)
                 change(item.id) { it.copy(state = "Downloading", line = "Connecting to YouTube…") }
                 scope.launch {
-                    try { perform(item) } finally {
+                    try {
+                        if(item.cloudRecord!=null) {
+                            try {
+                                check(CloudAccount.state.value.userId==item.accountId) { "Sign in to the task's account to retry" }
+                                CloudMedia.performDownload(context,com.google.gson.JsonParser.parseString(item.cloudRecord).asJsonObject,item.playWhenReady) { percent ->
+                                    checkRunning(item.id)
+                                    change(item.id,save=false) {it.copy(progress=percent.toFloat(),line="Downloading cloud audio")}
+                                }
+                                change(item.id) {if(it.state in listOf("Paused","Cancelled")) it else it.copy(state="Completed",progress=100f,line="Verified and added to library")}
+                            } catch(e: Exception) {
+                                if(e !is CancellationException) {
+                                    val transient=e is java.io.IOException && (e !is CloudHttpException || e.status==429 || e.status>=500)
+                                    val retry=transient && cloudAutoRetry && item.cloudAttempts<item.options.retries
+                                    val wait=cloudRetryDelay(item.cloudAttempts)
+                                    change(item.id) {it.copy(state=if(retry) "Queued" else "Failed",cloudAttempts=it.cloudAttempts+1,retryAfter=if(retry)System.currentTimeMillis()+wait else 0,error="Cloud transfer failed",line=if(retry) "Waiting to retry" else "Cloud download failed · retry available")}
+                                    if(retry)scope.launch {delay(wait);schedule()}
+                                }
+                            }
+                        } else perform(item)
+                    } finally {
                         synchronized(lock) { active.remove(item.id) }
                         schedule()
                     }
@@ -356,3 +411,5 @@ object DownloadStore {
     }
     fun temporaryBytes(): Long = workRoot.walkTopDown().filter { it.isFile && !it.path.contains("${File.separator}saved${File.separator}") }.sumOf { it.length() }
 }
+
+internal fun cloudRetryDelay(attempt:Int):Long = (2000L shl attempt.coerceIn(0,7)).coerceAtMost(300000L)

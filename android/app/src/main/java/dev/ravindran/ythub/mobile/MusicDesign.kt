@@ -88,24 +88,25 @@ internal fun musicTypography(): Typography {
 }
 @Composable internal fun PlaylistArtworkRow(playlist: LocalPlaylist, tracks: List<LocalTrack>, onClick: () -> Unit) {
     val ordered = remember(playlist.tracks, tracks) { val byId = tracks.associateBy { it.id }; playlist.tracks.mapNotNull { byId[it] } }
-    Surface(onClick = onClick, shape = MobileUi.card, border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .06f))) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            TrackArtwork(ordered.firstOrNull(), Modifier.size(52.dp))
-            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                Text(playlist.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
-                Text("${playlist.tracks.size} tracks · ${durationLabel(ordered.sumOf { it.durationMs } / 1000)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
-                Text(if (playlist.downloadId != null) "Downloaded playlist" else "Local playlist", style = MaterialTheme.typography.labelSmall, color = PlayerCrimson, modifier = Modifier.padding(top = 4.dp))
+    Surface(onClick = onClick, shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = .62f),
+        border = BorderStroke(.65.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .12f)), modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TrackArtwork(ordered.firstOrNull(), Modifier.size(44.dp).clip(RoundedCornerShape(50)))
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+                Text("${playlist.tracks.size} tracks · ${durationLabel(ordered.sumOf { it.durationMs } / 1000)}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Icon(Icons.Default.ChevronRight, "Open playlist")
+            Icon(Icons.Default.ChevronRight, "Open playlist", Modifier.size(20.dp))
         }
     }
 }
 @Composable internal fun MusicSettingsSection(title: String, summary: String, initiallyExpanded: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     var expanded by androidx.compose.runtime.saveable.rememberSaveable(title) { mutableStateOf(initiallyExpanded) }
     val rotation by animateFloatAsState(if (expanded) 180f else 0f, tween(MobileMotion.standard), label = "Settings disclosure")
-    Surface(shape = MobileUi.card, color = MaterialTheme.colorScheme.surface, border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .06f))) {
-        Column {
-            Row(Modifier.fillMaxWidth().semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }.clickable(role = Role.Button) { expanded = !expanded }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+    LiquidGlassPanel(Modifier.fillMaxWidth(), backdrop = LocalAtmosphereLayer.current, radius = 26.dp, animateOnTouch = false) {
+        Column(Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth().semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }.clickable(role = Role.Button) { expanded = !expanded }.padding(horizontal = 18.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) { Text(title, style = MaterialTheme.typography.titleMedium); if (summary.isNotBlank()) Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 3.dp)) }
                 Icon(Icons.Default.ExpandMore, null, Modifier.size(20.dp).graphicsLayer { rotationZ = rotation }, tint = PlayerCrimson)
             }

@@ -10,6 +10,7 @@ mod models;
 mod playlist;
 mod process;
 mod storage;
+mod account;
 use errors::AppError;
 use manager::Manager as DownloadManager;
 use models::*;
@@ -522,6 +523,7 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            account::account_secret_read, account::account_secret_write, account::cloud_media_available, account::cloud_media_save,
             get_state,
             get_history,
             get_job,

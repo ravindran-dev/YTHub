@@ -10,12 +10,16 @@ android {
         applicationId = "dev.ravindran.ythub.mobile"
         minSdk = 26
         targetSdk = 36
+        for (key in listOf("SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY")) {
+            val value = providers.environmentVariable(key).orElse(providers.gradleProperty(key)).getOrElse("")
+            buildConfigField("String", key, "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
+        }
         versionCode = 3
         versionName = "1.0.2"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
     packaging { jniLibs.useLegacyPackaging = true }

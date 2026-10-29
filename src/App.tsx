@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
+  UserRound,
   LayoutDashboard,
   Download,
   History,
@@ -28,7 +29,15 @@ import SettingsPage, { EnginePanel } from "./pages/Settings";
 import { JobDetails, Modal } from "./components/Common";
 import { active, terminal } from "./utils/media";
 
+import Account from "./pages/Account";
+import { startAccount, useAccount } from "./account/auth";
+import { selectAccount, synchronize } from "./account/sync";
+
 export default function App() {
+  const accountUser = useAccount(s => s.user?.id || null);
+  useEffect(() => { startAccount(); }, []);
+  useEffect(() => { selectAccount(accountUser); void synchronize(); }, [accountUser]);
+  useEffect(() => { const timer = window.setInterval(() => void synchronize(), 15000); return () => window.clearInterval(timer); }, []);
   const { db, page, navigate, error, message, clearError, notify, setDb } =
     useApp();
   const [selected, setSelected] = useState<string | null>(null);
@@ -176,6 +185,7 @@ export default function App() {
     { page: "downloads", label: "Downloads", Icon: Download },
     { page: "history", label: "History", Icon: History },
     { page: "settings", label: "Settings", Icon: Settings },
+    { page: "account", label: "Account", Icon: UserRound },
     { page: "about", label: "About", Icon: Info },
   ];
   return (
@@ -306,6 +316,7 @@ export default function App() {
             </div>
           ) : (
             <>
+              {page === "account" && <Account />}{" "}
               {page === "dashboard" && <Dashboard onSelect={setSelected} />}{" "}
               {page === "downloads" && <Downloads onSelect={setSelected} />}{" "}
               {page === "history" && (

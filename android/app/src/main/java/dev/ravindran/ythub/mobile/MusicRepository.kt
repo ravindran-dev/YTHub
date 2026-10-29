@@ -45,7 +45,7 @@ object MusicRepository {
             } finally { ready.value = true }
             saveRequests.receiveAsFlow().collect {
                 if (!writable) return@collect
-                val snapshot = synchronized(stateLock) { _state.value }
+                val snapshot = synchronized(stateLock) { CloudSync.localSnapshot(_state.value) }
                 var output: java.io.FileOutputStream? = null
                 try { output = file.startWrite(); output.write(gson.toJson(snapshot).toByteArray()); file.finishWrite(output) }
                 catch (e: Exception) { output?.let { file.failWrite(it) }; message.value = "Could not save music library: ${e.message}" }

@@ -77,7 +77,7 @@ private val MusicShape = MobileUi.card
 }
 @Composable internal fun MusicLibraryScreen(onDetailChanged: (Boolean) -> Unit = {}, onPlayer: () -> Unit, onDownload: (String) -> Unit, rootRequested: Boolean = false, onRootConsumed: () -> Unit = {}, requestedPlaylist: String? = null, onPlaylistConsumed: () -> Unit = {}, searchRequested: Boolean = false, onSearchConsumed: () -> Unit = {}) {
     val libraryFlow = remember { MusicRepository.state.map { it.copy(queue = emptyList(), queueIndex = 0, position = 0, repeat = 0, shuffle = false) }.distinctUntilChanged() }
-    val state by libraryFlow.collectAsStateWithLifecycle(initialValue = MusicRepository.state.value)
+    val state by libraryFlow.collectAsStateWithLifecycle(initialValue = remember { MusicRepository.state.value })
     val scanning by MusicRepository.scanning.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -123,7 +123,7 @@ private val MusicShape = MobileUi.card
     LaunchedEffect(category, playlistId, group) { val section = "$category:$playlistId:$group"; if (section != previousSection) { listState.scrollToItem(0); previousSection = section } }
     LaunchedEffect(searching) { if (searching) { listState.scrollToItem(0); withFrameNanos { }; searchFocus.requestFocus() } }
     val sectionReveal = remember { Animatable(1f) }
-    LaunchedEffect(playlistId, group, category) {
+    LaunchedEffect(playlistId, group, category, searching) {
         onDetailChanged(playlistId != null || group != null || category != "Overview" && !searching)
         sectionReveal.snapTo(.96f)
         sectionReveal.animateTo(1f, tween(160))
@@ -449,6 +449,9 @@ private val MusicShape = MobileUi.card
                             Spacer(Modifier.height(8.dp))
                             Surface(shape = MobileUi.card, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .045f)) {
                                 Column { extraActions.forEach { (label, action) -> MusicActionRow(label, when {
+                                    label == "Lyrics" -> Icons.Rounded.Lyrics
+                                    label == "Sleep timer" -> Icons.Rounded.Schedule
+                                    label == "Audio output" -> Icons.Rounded.DevicesOther
                                     label.startsWith("Skip backward") -> Icons.Rounded.FastRewind
                                     label.startsWith("Skip forward") -> Icons.Rounded.FastForward
                                     label.startsWith("Move") -> Icons.Rounded.ArrowUpward
